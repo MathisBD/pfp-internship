@@ -1,0 +1,23 @@
+# Obsidian pull / push arrays :
+
+Obsidian : EDSL implemented in Haskell, allows high level construction of CUDA kernels.
+
+Two representations of arrays :
+- pull arrays : length & function (index -> value)
+  --> when compiled to CUDA, one thread computes each element of the array
+  --> map/fusion is trivial : just compose the functions at the Haskell-level (before compiling to CUDA)
+  --> concatenating and interleaving arrays is slow : generates conditionals in the CUDA code
+- push arrays : length & collection of (index, value) pairs
+  --> allows sequential composition of actions : one thread can compute several elements of the array (typically 2).
+  --> concat/interleaving is faster : no conditionals, twice less threads and each thread does twice the work.
+  --> implemented in Haskell using CPS (ugh)
+
+In each case arrays are stored in shared memory, so the authors don't seem concerned about memory access patterns (coalescing...). Programmer also has to explicitly 'sync' the arrays, so that they are written to shared memory and e.g. fusion doesn't happen along sync boundaries.
+
+Push arrays : used to improve the performance of a set of combinators (ilv / vee, slightly less general than in the grant proposal), which are used to implement sorting networks (several kinds).
+
+Results : 
+- great speedup for the mini-sorters (20-30% less running-time)
+- marginal speedup for the big sorters
+
+TODO : ask Mary how they sort bigger arrays using the mini-sorters : why is the running time of the mini-sorters not dominating ? In particular, how do the iSwap/vSwap stages load data from global to shared memory (memory access on GPUs is very costly) since they don't access consecutive ranges of elements ?
