@@ -20,4 +20,22 @@ Results :
 - great speedup for the mini-sorters (20-30% less running-time)
 - marginal speedup for the big sorters
 
-TODO : ask Mary how they sort bigger arrays using the mini-sorters : why is the running time of the mini-sorters not dominating ? In particular, how do the iSwap/vSwap stages load data from global to shared memory (memory access on GPUs is very costly) since they don't access consecutive ranges of elements ?
+TODO : how do they sort bigger arrays using the mini-sorters ? I.e. why is the running time of the mini-sorters not dominating ? In particular, how do the iSwap/vSwap stages load data from global to shared memory (memory access on GPUs is very costly) since they don't access consecutive ranges of elements ?
+
+# PartIR :
+
+Goal : run nd-array programs (think numpy) using several GPUs/TPUs (a few hundred).
+Programs are written in Jax/XLA then lowered to PartIR (a dialect of MLIR). Essentially matrix multiplications / sums with simple control flow.
+
+Strategy : split/glue arrays in blocks along a given dimension (slice/tile), to then distribute worload accross devices. 
+
+Use rewrite rules to expose outer level parallelism, e.g.:
+  x <~~~> tile axis (\i -> slice axis i x)
+  matmul x y <~~~> tile 0 (\i -> matmul (slice 0 i x) y) 
+
+Build a cost model and apply rewrite rules to minimize the cost using Monte Carlo Tree Search.
+
+The parallelization is quite coarse : only a few hundred of devices. That's why the arrays are split in chunks rather than by elements.
+
+
+
