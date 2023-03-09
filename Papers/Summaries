@@ -34,6 +34,7 @@ Use rewrite rules to expose outer level parallelism, e.g.:
   matmul x y <~~~> tile 0 (\i -> matmul (slice 0 i x) y) 
 
 Build a cost model and apply rewrite rules to minimize the cost using Monte Carlo Tree Search.
+Trivial rules are applied eagerly (e.g. the first example above, from right to left).
 
 The parallelization is quite coarse : only a few hundred of devices. That's why the arrays are split in chunks rather than by elements.
 

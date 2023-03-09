@@ -1,0 +1,23 @@
+# Parm identities : 
+
+1. How does 'parm' change indices ? i.e. if a value is at index x in an array, at what index will it be in each of the two arrays created by parm ? 
+
+Answer : for a mask M, a value at index x will be at index x' in its subarray, and x' = x where we removed the bit at position lsb(M).
+
+Example : if the mask M is odd, then x is mapped to x/2.
+
+2. Can we exchange two parms, as in parm A . parm B ?
+
+Answer : yes in some cases.
+
+Define A' = A but we remove the bit at position lsb(B')
+       B' = B but we add a 0 at position lsb(A)
+
+If A_{lsb(B')} = 0, then parm A . parm B = parm B' . parm A'
+
+Special cases : 
+  - when A & B' = 0 we can exchange.
+  - when A and B are powers of 2 we can exchange and :
+    parm 2^i . parm 2^j = parm 2^(j+1) . parm 2^i   (for i <= j)
+    Fun fact : this is the relation that degeneracy maps satisfy in simplicial sets.
+

@@ -1,0 +1,27 @@
+# Questions for Mary
+
+1. See the Obsidian summary. (is this question relevant ?)
+
+2. What is the behaviour of 'parm' ? (maybe show me examples)
+
+# Questions for me
+
+1. Can we implement the tiling combinator using parm ? 
+This means apply a k-function f to x[0..k[, x[k..2k[, x[2k..3k[, etc.
+ -> maybe only for specific values of k ? e.g. power of 2 ?
+ -> when k is a power of 2, repeatedly composing parm k seems to work.
+
+2. Should we explore the following non-homogeneous combinators : 
+versions of parm / ilv etc. that discard one half and return the other half of the array ? 
+ -> Since we can make 'tile' using parm (for k power of 2), we would want to make slice (for k power of 2) to extract a contiguous k-slice of an array (i.e. all indices whose log(n)-log(k) first bits match a given sequence, for n the size of the array).
+ -> We would also have more general slicing : we could for instance extract a k-slice consisting of the indices whose last log(n)-log(k) bits match a given sequence.
+
+# Papers to read 
+
+1. Hierarchically Tiled Arrays (David Padua) 
+
+2. Lift language (relevant ?)
+
+3. Conal Elliott
+
+4. R. Bird, Mertens (A theory of lists)
