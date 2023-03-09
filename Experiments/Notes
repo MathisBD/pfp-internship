@@ -21,3 +21,30 @@ Special cases :
     parm 2^i . parm 2^j = parm 2^(j+1) . parm 2^i   (for i <= j)
     Fun fact : this is the relation that degeneracy maps satisfy in simplicial sets.
 
+
+3. Can we push a BMMC through a single parm M ? 
+Since we can decompose parm M as bmmc A ->- ilv ->- bmmc A^-1, it would suffice to know how to push a BMMC through ilv.
+
+4. How to decompose parm M using ilv and BMMC permutations ? 
+
+Answer : we have parm M = bmmc A ->- ilv ->- bmmc A^-1
+  where A = (---M---)
+            (1-0----)
+            (-10----)
+            (--01---)
+            (--0-1--)
+            (--0--1-)
+            (--0---1)
+        i.e. M is on the first line (lsb to the left) and the column of 0s is at index lsb(M)
+
+To make que the matrix is
+  (01--)
+  (10--)
+  (--ID)
+
+To make vee the matrix is 
+  (11--)
+  (01--)
+  (--ID)
+
+Problem : these two matrices don't seem sufficient to make every BMMC...
