@@ -1,4 +1,4 @@
-module Main ( main ) where 
+module Main where 
 
 import Data.Bits
 
@@ -35,15 +35,20 @@ col k f g xs = [ res i | i <- [0..length xs - 1] ]
                 then f (xs !! i) (xs !! (i `xor` k))
                 else g (xs !! i) (xs !! (i `xor` k))
 
+removeBit :: Int -> Int -> Int 
+removeBit i x = ((x .&. high) `shiftR` 1) .|. (x .&. low)
+  where high = (complement 0) `shiftL` (i+1)
+        low  = (1 `shiftL` i) - 1
+
 -- Make a k-regular column, but build it using parm.
 colWithPar :: Int -> (a -> a -> a) -> (a -> a -> a) -> [a] -> [a]
-colWithPar k f g
-  | k <= 0         = undefined
-  | k == 1         = \[x0, x1] -> [f x0 x1, g x0 x1]
-  | k `mod` 4 == 0 = ilv $ col (k `div` 2) f g
-  | k `mod` 4 == 1 = que $ col (k `div` 2) f g
-  | k `mod` 4 == 2 = ilv $ col (k `div` 2) f g
-  | k `mod` 4 == 3 = vee $ col (k `div` 2) f g
+colWithPar k _ _ _ | k <= 0 = undefined
+colWithPar k f g [x0, x1] = [f x0 x1, g x0 x1]
+colWithPar k f g xs
+  | k `mod` 4 == 0 = ilv (col (removeBit 0 k) f g) xs
+  | k `mod` 4 == 1 = que (col (removeBit 1 k) f g) xs
+  | k `mod` 4 == 2 = ilv (col (removeBit 0 k) f g) xs
+  | k `mod` 4 == 3 = vee (col (removeBit 0 k) f g) xs
 
 
 replicateMin :: [Int] -> [Int]
@@ -51,10 +56,7 @@ replicateMin xs = replicate (length xs) (minimum xs)
 
 main :: IO ()
 main = do 
-  let xs = [0..15]
-      f1 = (ilv . ilv . ilv) replicateMin
-      f2 = col 8 min min
-      f3 = colWithPar 8 min min
-  print $ f1 xs
-  print $ f2 xs  
-  print $ f3 xs      
+  let xs = [0..7]
+      ys = [0, 1, 1, 0, 1, 0, 0, 1]
+  print $ parm 7 replicateMin xs
+  print ys

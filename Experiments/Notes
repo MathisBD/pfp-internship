@@ -68,3 +68,16 @@ Indeed weaving f on a big array can make it so that each application of f has ve
 The performance implications would be :
 - A potential order of magnitude speedup for the application of f if it is memory bound.
 - A single additional bmmc perm (and thus memory accesses) between each column. Note that consecutive perms are easily fused. 
+
+6. How to decompose a k-regular column into a composition of parm ? 
+- Choose a mask M such that k xor M has an even number of set bits
+- Set k' = k but we remove the bit at index lsb(M)
+- We have col k = parm M . col k'
+
+Note that we can always choose M to be 1, 2 or 3 (depending on the value of k mod 4) yielding a decomposition using only ilv, que and vee.
+
+Also if we have two columns k1 and k2 such that k1 and k2 have at least 3 bits (in total), we can make sure that the first mask M is the same for both. 
+This makes it so that we can always write, for any 2-functions f and g :
+  col k1 f ->- col k2 g = parm M_1 $ ... $ parm M_n $ (parm A f ->- parm B g)
+    for some masks M_i, A, B
+
