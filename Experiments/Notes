@@ -23,7 +23,6 @@ Special cases :
 
 
 3. Can we push a BMMC through a single parm M ? 
-Since we can decompose parm M as bmmc A ->- ilv ->- bmmc A^-1, it would suffice to know how to push a BMMC through ilv.
 
 4. How to decompose parm M using ilv and BMMC permutations ? 
 
@@ -37,6 +36,8 @@ Answer : we have parm M = bmmc A ->- ilv ->- bmmc A^-1
             (--0---1)
         i.e. M is on the first line (lsb to the left) and the column of 0s is at index lsb(M)
 
+(I can also give an explicit form for A^-1)
+
 To make que the matrix is
   (01--)
   (10--)
@@ -48,3 +49,22 @@ To make vee the matrix is
   (--ID)
 
 Problem : these two matrices don't seem sufficient to make every BMMC...
+
+5. We also have the identity : 
+  ilv (bmmc A) = (1 0)
+                 (0 A)
+
+This allows us to express nested applications of parm : 
+  parm M $ parm N f = bmmc (M_A * M_B') ->- ilv (ilv f) ->- bmmc (M_A * M_B')^-1
+    where M_B' is (1  0 )
+                  (0 M_B)
+
+Of course we can do the same with 'two' instead of 'ilv' : this could be better for GPU compilation,
+as applying a function to a contiguous (sub)array is better.
+This could allow for efficient compilation of these weaving-like function applications, 
+if we can figure out how to implement bmmc permutations efficiently.
+
+Indeed weaving f on a big array can make it so that each application of f has very bad coallescing behaviour. It could be worth it to perform a permutation of the big array between each column of two^k.
+The performance implications would be :
+- A potential order of magnitude speedup for the application of f if it is memory bound.
+- A single additional bmmc perm (and thus memory accesses) between each column. Note that consecutive perms are easily fused. 
