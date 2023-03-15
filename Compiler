@@ -1,0 +1,26 @@
+# Frontend :
+
+Language.Futhark.Core : 
+- Name/VName def
+- source code location def + utilities 
+Language.Futhark.Primitive :
+- Primitive types (scalar types) def
+- Primitive values (scalar literals) def
+- Basic operations on scalars (both symbolic and in place, for constant folding),
+  i.e. unary/binary ops + trig functions etc.
+
+# Backend : 
+
+Futhark.IR.Syntax.Core :
+- Basic core IR (types and shapes, small parts of the AST)
+- Re-exported by Futhar.IR.Syntax
+Futhark.IR.Syntax : 
+- Core IR main AST parts (program, function, statement, expression, etc.)
+Futhark.IR.Pretty :
+- Pretty printing for all the AST
+
+
+# Utils : 
+
+Futhark.Utils.Pretty :  
+- Pretty printing library

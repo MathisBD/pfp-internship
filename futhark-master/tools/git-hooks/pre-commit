@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# Futhark pre-commit hook for quality-checking the commit.
+#
+# This hook checks the following:
+#
+#   * Trailing whitespace.
+#   * Runs hlint.
+#   * Tries to compile Futhark.
+#
+# It also yells at you to run the test suite, although it doesn't do
+# it by itself.
+
+initial=c508f9f531929f6bed868243334417ef6c840cb4 # Hash of initial commit.
+
+fail() {
+    echo "Aborting commit due to verification errors."
+    echo "If you disagree, use git commit --no-verify."
+    exit 1
+}
+
+echo Quality-checking commit...
+echo
+
+# Find files with trailing whitespace
+if git diff-index --cached --check HEAD | egrep -v '^[+-]'; then
+    fail
+fi
+
+make check-commit || fail
+make build || fail

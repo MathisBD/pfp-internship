@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+    - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+jobs:
+  build:
+    name: Create and upload release tarballs
+    if: github.event.base_ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v20
+
+    - name: Prepare metadata
+      id: metadata
+      run: |
+        echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        echo "TARBALL=futhark-${GITHUB_REF#refs/tags/v}-linux-x86_64.tar.xz" >> $GITHUB_OUTPUT
+
+    - name: Build tarball
+      env:
+        VERSION: ${{ steps.metadata.outputs.VERSION }}
+      run: nix-build --argstr suffix $VERSION-linux-x86_64 --argstr commit $GITHUB_SHA
+
+    - name: Extract release changes
+      env:
+        VERSION: ${{ steps.metadata.outputs.VERSION }}
+      run:
+        sh tools/changelog.sh $VERSION < CHANGELOG.md > release_changes.md
+
+    - name: Create release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: ${{ steps.metadata.outputs.VERSION }}
+        body_path: release_changes.md
+        draft: false
+        prerelease: false
+
+    - name: Upload tarball
+      id: upload-release-asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: result/${{ steps.metadata.outputs.TARBALL }}
+        asset_name: ${{ steps.metadata.outputs.TARBALL }}
+        asset_content_type: application/x-xz
+
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSHKEY }}
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
+
+    - name: scp to server
+      env:
+        TARBALL: ${{ steps.metadata.outputs.TARBALL }}
+      run: scp -o StrictHostKeyChecking=no result/$TARBALL futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/releases
+
+  upload-to-hackage:
+    name: Upload to Hackage
+    if: github.event.base_ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v20
+
+    - uses: cachix/cachix-action@v12
+      with:
+        name: futhark
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+    - name: Upload to Hackage
+      run: |
+        export HACKAGE_KEY
+        export VERSION
+        nix-shell --run 'cabal update'
+        nix-shell --run tools/release/hackage.sh
+      env:
+        HACKAGE_KEY: ${{ secrets.HACKAGE_KEY }}
+        VERSION: ${{ steps.metadata.outputs.VERSION }}

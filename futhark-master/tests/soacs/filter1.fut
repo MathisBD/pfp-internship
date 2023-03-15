@@ -1,0 +1,14 @@
+-- ==
+-- input {
+--   [1,0,2,-5,3,-1]
+-- }
+-- output {
+--   [1, 2, 3]
+-- }
+-- input {
+--   empty([0]i32)
+-- }
+-- output {
+--   empty([0]i32)
+-- }
+def main(a: []i32): []i32 = filter (0<) a

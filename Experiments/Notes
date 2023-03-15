@@ -54,6 +54,8 @@ Problem : these two matrices don't seem sufficient to make every BMMC...
   ilv (bmmc A) = (1 0)
                  (0 A)
 
+parm M $ parm N f ->- parm M $ parm N f ->- parm M $ parm N f
+
 This allows us to express nested applications of parm : 
   parm M $ parm N f = bmmc (M_A * M_B') ->- ilv (ilv f) ->- bmmc (M_A * M_B')^-1
     where M_B' is (1  0 )
@@ -76,8 +78,12 @@ The performance implications would be :
 
 Note that we can always choose M to be 1, 2 or 3 (depending on the value of k mod 4) yielding a decomposition using only ilv, que and vee.
 
-Also if we have two columns k1 and k2 such that k1 and k2 have at least 3 bits (in total), we can make sure that the first mask M is the same for both. 
+Also if we have two columns k1 and k2 such that k1 and k2 have at least 3 bits each (in total), we can make sure that the first mask M is the same for both. 
 This makes it so that we can always write, for any 2-functions f and g :
-  col k1 f ->- col k2 g = parm M_1 $ ... $ parm M_n $ (parm A f ->- parm B g)
+  col k1 f ->- col k2 g =
+    parm M_1 $ ... $ parm M_n $ (parm A f ->- parm B g)
     for some masks M_i, A, B
+
+(And in 75% of cases we can choose A = B)
+
 
