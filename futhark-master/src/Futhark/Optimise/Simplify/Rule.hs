@@ -16,7 +16,7 @@ module Futhark.Optimise.Simplify.Rule
     RuleM,
     cannotSimplify,
     liftMaybe,
-
+    
     -- * Rule definition
     Rule (..),
     SimplificationRule (..),

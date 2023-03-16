@@ -219,3 +219,4 @@ runPass pass prog = do
   verb <- asks $ (>= VeryVerbose) . futharkVerbose
   when verb $ addLog logged
   pure prog'
+

@@ -71,12 +71,12 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Copy v)
     -- simplifier applies bottom-up rules in a kind of deepest-first
     -- order.
     not (patElemName d `UT.isInResult` used)
-      || patElemName d
-      `UT.isConsumed` used
+      || patElemName d `UT.isConsumed` used
       -- Always OK to remove the copy if 'v' has no aliases and is never
       -- used again.
       || (v_is_fresh && v_not_used_again),
-    (v_not_used_again && consumable) || not (patElemName d `UT.isConsumed` used) =
+    (v_not_used_again && consumable) 
+      || not (patElemName d `UT.isConsumed` used) =
       Simplify $ auxing aux $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
     v_not_used_again = not (v `UT.used` used)
