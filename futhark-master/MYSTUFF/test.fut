@@ -1,7 +1,9 @@
 
 
-def g [n] (xs : [n]i32) : i32 =
-  reduce (+) 0 xs
-  
-entry f [n] (xs : [n]i32) : [n]i32 = 
-  map (\x -> x + (1 + 3)) (map (\x -> g xs * x) xs)
+def g1 x = x + 1i32
+def g2 x = g1 x + 2i32
+def g3 x = g2 x + 3i32
+def g4 x = g3 x + 4i32
+def g5 x = g4 x + 5i32
+
+entry f x = g5 x + 6i32

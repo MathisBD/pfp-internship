@@ -239,7 +239,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
   mapout_merge <- forM (drop (length nes) $ lambdaReturnType lam) $ \t ->
     let t' = t `setOuterSize` w
         scratch = BasicOp $ Scratch (elemType t') (arrayDims t')
-     in (,)
+    in (,)
           <$> newParam "stream_mapout" (toDecl t' Unique)
           <*> letSubExp "stream_mapout_scratch" scratch
 
