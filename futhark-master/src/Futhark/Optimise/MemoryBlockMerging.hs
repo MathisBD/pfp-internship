@@ -21,6 +21,7 @@ import Futhark.Pass (Pass (..), PassM)
 import Futhark.Pass qualified as Pass
 import Futhark.Util (invertMap)
 
+
 -- | A mapping from allocation names to their size and space.
 type Allocs = Map VName (SubExp, Space)
 
@@ -44,7 +45,7 @@ getAllocsSegOp (SegScan _ _ _ _ body) =
 getAllocsSegOp (SegHist _ _ _ _ body) =
   foldMap getAllocsStm (kernelBodyStms body)
 
-setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem
+setAllocsStm :: Map VName SubExp -> Stm GPUMem -> Stm GPUMem        
 setAllocsStm m stm@(Let (Pat [PatElem name _]) _ (Op (Alloc _ _)))
   | Just s <- M.lookup name m =
       stm {stmExp = BasicOp $ SubExp s}
@@ -81,7 +82,7 @@ setAllocsSegOp m (SegHist lvl sp segbinops tps body) =
 
 maxSubExp :: MonadBuilder m => Set SubExp -> m SubExp
 maxSubExp = helper . S.toList
-  where
+  where 
     helper (s1 : s2 : sexps) = do
       z <- letSubExp "maxSubHelper" $ BasicOp $ BinOp (UMax Int64) s1 s2
       helper (z : sexps)

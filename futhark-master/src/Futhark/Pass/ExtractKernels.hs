@@ -609,8 +609,7 @@ onMap path (MapLoop pat aux w lam arrs) = do
       exploitInnerParallelism path' =
         runDistNestT (env path') $
           distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
-
-  let exploitOuterParallelism path' = do
+      exploitOuterParallelism path' = do
         let lam' = soacsLambdaToGPU lam
         runDistNestT (env path') $
           distribute $
