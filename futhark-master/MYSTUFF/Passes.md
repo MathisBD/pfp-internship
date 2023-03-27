@@ -15,7 +15,7 @@ In this rep, potential parallelism is represented as SOACS : these are high-leve
 
 --> A note on the GPU rep
 
-In this rep, parallelism is explicit : the most common construct is a 'SegOp', which roughly corresponds to a GPU kernel. A SegOp is a segmented map/scan/red/histogram, that executes at a given 'SegLevel'. The body of a SegOp can contain more parallelism in some specific case : for now the only one I have found is that a 'SegThreadInGroup' SegOp can be nested inside a 'SegGroup' SegOp (this is enforced in the type checking rules). I still don't know what the semantics of these are though.
+In this rep, parallelism is explicit : the most common construct is a 'SegOp', which roughly corresponds to a GPU kernel. A SegOp is a segmented map/scan/red/histogram, that executes at a given 'SegLevel'. The body of a SegOp can contain more parallelism in some specific case : for now the only one I have found is that a 'SegThreadInGroup' SegMap can be nested inside a 'SegGroup' SegMap (this is enforced in the type checking rules). I still don't know what the semantics of these are though.
 
 Weirdly enough, there can still be plain high-level SOACS in this rep (using the 'OtherOp' constructor of 'HostOp'). I don't know yet what purpose they serve, but they are eventually sequentialised in the 'unstreamGPU' pass (before we convert to GPUMem rep).
 

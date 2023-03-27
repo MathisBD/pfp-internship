@@ -1,0 +1,72 @@
+types {
+  
+}
+
+
+
+entry("main",
+      {xs: *[]i32},
+      {*[]i32})
+  entry_main (xs_mem_6089 : mem@device,
+              n_6064 : i64,
+              xs_6065 : *[n_6064]i32 @ xs_mem_6089 ->
+                        {base: [n_6064];
+                         contiguous: true;
+                         LMADs: [{offset: 0i64;
+                                  strides: [1i64];
+                                  shape: [n_6064];
+                                  permutation: [0];
+                                  monotonicity: [Inc]}]})
+  : {mem@device,
+     *[n_6064]i32 @ ?0@device ->
+     {base: [n_6064];
+      contiguous: true;
+      LMADs: [{offset: 0i64;
+               strides: [1i64];
+               shape: [n_6064];
+               permutation: [0];
+               monotonicity: [Inc]}]}} = {
+  let {mem_6091 : mem@device} =
+    alloc(32i64, @device)
+  let {is_6077 : [4i64]i64 @ mem_6091 ->
+                 {base: [4i64];
+                  contiguous: true;
+                  LMADs: [{offset: 0i64;
+                           strides: [1i64];
+                           shape: [4i64];
+                           permutation: [0];
+                           monotonicity: [Inc]}]}} =
+    [0i64, 15i64, 3i64, 4i64] : []i64
+  let {mem_6093 : mem@device} =
+    alloc(16i64, @device)
+  let {vs_6078 : [4i64]i32 @ mem_6093 ->
+                 {base: [4i64];
+                  contiguous: true;
+                  LMADs: [{offset: 0i64;
+                           strides: [1i64];
+                           shape: [4i64];
+                           permutation: [0];
+                           monotonicity: [Inc]}]}} =
+    [1i32, 2i32, 3i32, 4i32] : []i32
+  let {segmap_group_size_6087 : i64} =
+    get_size(segmap_group_size_6086, group_size)
+  let {segmap_usable_groups_6088 : i64} = sdiv_up64(4i64, segmap_group_size_6087)
+  let {scatter_res_6082 : [n_6064]i32 @ xs_mem_6089 ->
+                          {base: [n_6064];
+                           contiguous: true;
+                           LMADs: [{offset: 0i64;
+                                    strides: [1i64];
+                                    shape: [n_6064];
+                                    permutation: [0];
+                                    monotonicity: [Inc]}]}} =
+    segmap(thread; ; groups=segmap_usable_groups_6088; groupsize=segmap_group_size_6087)
+    (write_i_6083 < 4i64) (~phys_tid_6084) : {i32} {
+      let {write_index_6080 : i64} =
+        is_6077[write_i_6083]
+      let {write_value_6081 : i32} =
+        vs_6078[write_i_6083]
+      return {xs_6065 : [n_6064]
+      with ([write_index_6080] = write_value_6081)}
+    }
+  in {xs_mem_6089, scatter_res_6082}
+}

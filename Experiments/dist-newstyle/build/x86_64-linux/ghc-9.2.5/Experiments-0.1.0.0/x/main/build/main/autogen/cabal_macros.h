@@ -10,6 +10,16 @@
   (major1) == 0 && (major2) <  1 || \
   (major1) == 0 && (major2) == 1 && (minor) <= 0)
 #endif /* MIN_VERSION_Experiments */
+/* package Unique-0.4.7.9 */
+#ifndef VERSION_Unique
+#define VERSION_Unique "0.4.7.9"
+#endif /* VERSION_Unique */
+#ifndef MIN_VERSION_Unique
+#define MIN_VERSION_Unique(major1,major2,minor) (\
+  (major1) <  0 || \
+  (major1) == 0 && (major2) <  4 || \
+  (major1) == 0 && (major2) == 4 && (minor) <= 7)
+#endif /* MIN_VERSION_Unique */
 /* package base-4.16.4.0 */
 #ifndef VERSION_base
 #define VERSION_base "4.16.4.0"

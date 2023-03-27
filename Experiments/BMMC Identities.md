@@ -2,7 +2,7 @@
 
 1. How does 'parm' change indices ? i.e. if a value is at index x in an array, at what index will it be in each of the two arrays created by parm ? 
 
-Answer : for a mask M, a value at index x will be at index x' in its subarray, and x' = x where we removed the bit at position lsb(M).
+Answer : for a mask M, a value at index x will be at index x' in its subarray, and x' = x where we removed (deleted, not set to 0) the bit at position lsb(M).
 
 Example : if the mask M is odd, then x is mapped to x/2.
 
@@ -49,6 +49,7 @@ To make vee the matrix is
   (--ID)
 
 Problem : these two matrices don't seem sufficient to make every BMMC...
+But almost.
 
 5. We also have the identity : 
   ilv (bmmc A) = (1 0)
@@ -85,5 +86,3 @@ This makes it so that we can always write, for any 2-functions f and g :
     for some masks M_i, A, B
 
 (And in 75% of cases we can choose A = B)
-
-

@@ -30,6 +30,7 @@ executable main
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base ^>=4.16.4.0,
-                      text-format-simple >= 1.1
+                      text-format-simple >= 1.1,
+                      Unique >= 0.4.7
     hs-source-dirs:  
     default-language: Haskell2010

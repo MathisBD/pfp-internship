@@ -1,7 +1,9 @@
 module Main where 
 
 import Data.Bits
-
+import Data.List ( sort )
+import Data.List.Unique ( count )
+import Control.Monad ( forM_ )
 
 -- Seperate a list in two.
 -- The list of booleans tells whether each element should go left or right.
@@ -54,9 +56,51 @@ colWithPar k f g xs
 replicateMin :: [Int] -> [Int]
 replicateMin xs = replicate (length xs) (minimum xs)
 
+--main :: IO ()
+--main = do 
+--  let xs = [0..7]
+--      ys = [0, 1, 1, 0, 1, 0, 0, 1]
+--  print $ parm 7 replicateMin xs
+--  print ys
+
+-- The permutation is defined as the mapping between the indices
+-- and the corresponding elements.
+type Perm = [Int]
+
+-- Generate all permutations on n elements.
+genPerms :: Int -> [Perm]
+genPerms 0 = [[]]
+genPerms n = do
+  -- Choose the image of the first element
+  first <- [0..n-1]
+  -- Choose the image of the other n-1 elements
+  rest <- genPerms (n-1)
+  -- Combine them 
+  pure $ first : map (\x -> if x < first then x else x + 1) rest
+
+-- The k-cross-rank of a permutation is the number of indices that cross 
+-- a line between k-1 and k, in one direction.
+permRank :: Int -> Perm -> Int
+permRank k perm = tally [perm !! i >= k | i <- [0..k-1]]
+  where tally = foldl (\acc b -> if b then acc + 1 else acc) 0
+
+binom :: Integer -> Integer -> Integer
+binom n 0 = 1
+binom 0 k = 0
+binom n k = (binom (n-1) (k-1) * n) `div` k
+
+fact :: Integer -> Integer 
+fact 0 = 1
+fact n = n * fact (n-1)
+
 main :: IO ()
 main = do 
-  let xs = [0..7]
-      ys = [0, 1, 1, 0, 1, 0, 0, 1]
-  print $ parm 7 replicateMin xs
-  print ys
+  let n = 18
+      k = 10
+      --perms = genPerms (fromInteger n)
+      --hist = count $ map (permRank (fromInteger k)) perms
+      hist = map (\m -> (m, binom k m * binom (n-k) m * fact k * fact (n-k))) [0..k]
+      total = sum (map snd hist)
+  forM_ hist $ \(m, c) -> do
+    let p = 100 * (fromInteger c / fromInteger total)
+    putStrLn $ "  " <> show m <> " --> " <> show (round p) <> "%"
