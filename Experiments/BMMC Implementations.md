@@ -4,7 +4,7 @@ Notation : N = 2^n is a vector length.
 
 We will generally have g <= k <= n.
 
-1. How to perfom the following BMMC perm on the GPU :
+1. How to perfom the following BMMC perm (MRC, memory rearrange complement) on the GPU :
   (A B)
   (0 C) where size(A) = k*k and size(C) = (n-k)*(n-k)
       
@@ -83,3 +83,54 @@ We can perform U*T1 in a single pass.
 We can fuse U' into the last pass of P' (which is also upper triangular, and we can choose K to match both), to perform U'*P' in 5 passes.
 
 This brings us to 6 passes (and hopefully 4 in most cases).
+
+5. Could we replace LMADs with BMMC perms ? 
+This would require :
+A. All arrays to one-dimensional.
+B. All array sizes to be powers of 2.
+C. All array sizes to be known at compile time (if we want the BMMC perms to be known at compile time).
+D. Array slices to be powers of two (size, stride, maybe even offset).
+
+- B Could be fixed by having the compiler automatically pad arrays to a power of 2.
+Is it worth it ? E.g. mapping and reducing an array becomes tricky... more bookkeeping to perform.
+
+- Of these restrictions, C seems to be the most annoying. 
+We could maybe fix this by using matrices that have blocks (filled with e.g. 0s or an identity matrix) with existential sizes. We would calculate the exact matrices at execution time, using the sizes of the actual arrays. This would also mean we would have to do the matrix multiplications and factorizations at execution time. How fast is it to factorize a e.g. 30*30 binary matrix on the GPU ? Negligible compared to the global memory accesses ?
+We could also have matrices that have entries that are expressions (as for LMADs). The issue is that the size of the expression for a given entry would grow exponentially with the number of matrices in e.g. a chained matrix multiplication (it grows linearly for LMAD operations).
+Another option would be to calculate the explicit matrix for every size (1 to 64) at compile time, and choose the correct one at run time --> how to deal with bmmc slices ? 
+
+
+
+It would allow us :
+- To introduce the parm combinator.
+- To fuse nested applications of parm.
+
+Do we introduce the col combinator as a primitive ? It can be built using parm, but the number of such parms depends on the size of the input array.
+This means that we can likely not detect compositions of parm that form regular columns at compile time. This is bad because sequential composition of two regular columns can be fused into a single column in many instances, and always into a single kernel. 
+
+Another issue is : do we introduce the BMMC perms at the memory level or before ? The LMADs are at the memory level, but the BMMC perms would benefit from having fusion rules apply to them.
+
+Do we even need parm at all in the IR ? Would it be enough to have BMMC and col ?
+The fusion algebra would definitely be simpler.
+
+6. How to integrate BMMCs into the IR :
+- At the SOACS level : BMMCs as an index space transformation.
+- At the memory level (GPUMem) : BMMCs replace LMADs, i.e. each array is assigned some memory block and a BMMC on this block, and also the array size (initial segment of the memory that has been permuted).
+
+Fusion at the SOACS level :
+- parm M f becomes bmmc A ->- two f ->- bmmc A^-1
+  --> Issue : how to represent A ? While M is a compile time constant, the size of the input array could be arbitrary big...
+- bmmc A ->- bmmc B becomes bmmc (B*A)
+- col k1 f ->- col k2 g becomes col k3 (f ->- g) when possible
+- two (bmmc A ->- f) becomes bmmc A' ->- two f (to enable further bmmc fusion)
+- two (f ->- bmmc A) becomes two f ->- bmmc A' 
+- two (col k1 f) becomes col k2 f
+
+Other nice simplifications :
+- replicate n x ->- bmmc A becomes replicate n x
+- bmmc A ->- reduce_comm becomes reduce_comm
+
+We can also push BMMCs through col and map. Would it be worth it ?
+Yes if it can enable further fusion of BMMCs. Push forwards or backwards ?
+
+Then at the memory level we can compile BMMC permutations and slicing as simply multiplying the array's BMMC. We can also implement coalescing as manifesting the array with its BMMC multiplied by the coalescing BMMC.

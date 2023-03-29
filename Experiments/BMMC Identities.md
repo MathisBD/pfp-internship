@@ -24,48 +24,35 @@ Special cases :
 
 3. Can we push a BMMC through a single parm M ? 
 
-4. How to decompose parm M using ilv and BMMC permutations ? 
+4. How to decompose parm M using two and BMMC permutations ? 
 
-Answer : we have parm M = bmmc A ->- ilv ->- bmmc A^-1
-  where A = (---M---)
-            (1-0----)
+Answer : we have parm M f = bmmc A ->- two f ->- bmmc A^-1
+  where A = (1-0----)
             (-10----)
             (--01---)
             (--0-1--)
             (--0--1-)
             (--0---1)
-        i.e. M is on the first line (lsb to the left) and the column of 0s is at index lsb(M)
+            (---M---)
+          i.e. M is on the last line (lsb to the left) and the column of 0s is at index lsb(M)
 
 (I can also give an explicit form for A^-1)
 
-To make que the matrix is
-  (01--)
-  (10--)
-  (--ID)
-
-To make vee the matrix is 
-  (11--)
-  (01--)
-  (--ID)
-
-Problem : these two matrices don't seem sufficient to make every BMMC...
-But almost.
+To make ilv the matrix is 
+  (-I)
+  (1-) where I is the identity matrix
 
 5. We also have the identity : 
-  ilv (bmmc A) = (1 0)
-                 (0 A)
-
-parm M $ parm N f ->- parm M $ parm N f ->- parm M $ parm N f
+  two (bmmc A) = (A 0)
+                 (0 1)
 
 This allows us to express nested applications of parm : 
-  parm M $ parm N f = bmmc (M_A * M_B') ->- ilv (ilv f) ->- bmmc (M_A * M_B')^-1
-    where M_B' is (1  0 )
-                  (0 M_B)
+  parm M $ parm N f = bmmc (M_A * M_B') ->- two (two f) ->- bmmc (M_A * M_B')^-1
+    where M_B' is (M_B 0)
+                  ( 0  1)
 
-Of course we can do the same with 'two' instead of 'ilv' : this could be better for GPU compilation,
-as applying a function to a contiguous (sub)array is better.
-This could allow for efficient compilation of these weaving-like function applications, 
-if we can figure out how to implement bmmc permutations efficiently.
+This could be good for GPU compilation, as applying a function to a contiguous (sub)array is better.
+This could allow for efficient compilation of these weaving-like function applications, if we can figure out how to implement bmmc permutations efficiently.
 
 Indeed weaving f on a big array can make it so that each application of f has very bad coallescing behaviour. It could be worth it to perform a permutation of the big array between each column of two^k.
 The performance implications would be :

@@ -95,7 +95,7 @@ fact n = n * fact (n-1)
 
 main :: IO ()
 main = do 
-  let n = 18
+  let n = 20
       k = 10
       --perms = genPerms (fromInteger n)
       --hist = count $ map (permRank (fromInteger k)) perms
