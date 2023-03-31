@@ -1,11 +1,11 @@
 
 .PHONY: all run clean
 
-all: test.cpp test.cu
-	g++ -I/opt/rocm-5.3.3/include -L/opt/rocm-5.3.3/lib test.cpp -lOpenCL -o test
+all: bmmc.cpp bmmc.cu perm.h
+	g++ -I/opt/rocm-5.3.3/include -L/opt/rocm-5.3.3/lib bmmc.cpp -lOpenCL -o a.out
 
 run: all
-	./test
+	./a.out
 
 clean: 
-	rm test
+	rm a.out

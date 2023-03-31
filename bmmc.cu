@@ -3,7 +3,7 @@
 // The permutation is defined as an array of n ulong, i.e. one ulong for each row.
 void kernel naive_bmmc(
     int n, 
-    global const ulong* bmmc, 
+    constant ulong* bmmc, 
     global const int* in_vect, 
     global int* out_vect) 
 {
@@ -24,7 +24,7 @@ void kernel naive_bmmc(
 void kernel mrc(
     int n, 
     int k, 
-    global const ulong* bmmc, 
+    constant ulong* bmmc, 
     global const int* in_vect, 
     global int* out_vect,
     local int* buffer) 
@@ -49,4 +49,13 @@ void kernel mrc(
         out_idx |= (popcount(bmmc[i] & id) & 1) << i;
     }
     out_vect[out_idx] = buffer[lid];
+}
+
+void kernel scatter(
+    global const int* in_vals,
+    global const int* in_idxs,
+    global int* out_vect)
+{
+    size_t id = get_global_id(0);
+    out_vect[in_idxs[id]] = in_vals[id];
 }
