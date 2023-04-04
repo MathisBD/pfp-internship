@@ -84,260 +84,681 @@ public:
         }
     }
     
-    std::pair<std::vector<int>, double> slow_bpc(const permutation& perm, const std::vector<int>& input_h, int iterations = 1)
+    // n is the number of bits to encode indices
+    std::vector<cl::Event> slow_bmmc(
+        int n, const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d)
     {
-        // Compute the number of bits to encode indices.
-        int BITS = 0;
-        while ((1 << BITS) < input_h.size()) {
-            BITS++;
-        }
-        assert((1 << BITS) == input_h.size());
-        assert(perm.size() == BITS);
-
-        // Allocate the buffers
-        BMMC bmmc_h = perm_to_bmmc(perm);
-        std::vector<int> output_h(1 << BITS, 0);
-        cl::Buffer bmmc_d(m_context, CL_MEM_READ_ONLY, sizeof(uint64_t) * 64);
-        cl::Buffer input_d(m_context, CL_MEM_READ_ONLY, sizeof(int) * (1 << BITS));
-        cl::Buffer output_d(m_context, CL_MEM_READ_WRITE, sizeof(int) * (1 << BITS));
-        
-        // Copy data to the GPU
-        CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * 64, bmmc_h.data()));
-        CLguard(m_queue.enqueueWriteBuffer(input_d, CL_TRUE, 0, sizeof(int) * (1 << BITS), input_h.data()));
+        // Create the BMMC on the GPU
+        assert(bmmc.size() == n);
+        cl::Buffer bmmc_d(m_context, CL_MEM_READ_ONLY, sizeof(uint64_t) * n);
+        CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * n, bmmc.data()));
         
         // Call the kernel
         const int GROUP_BITS = 8;
         cl::Kernel naive_bmmc = cl::Kernel(m_program, "naive_bmmc");
-        naive_bmmc.setArg(0, BITS);
+        naive_bmmc.setArg(0, n);
         naive_bmmc.setArg(1, bmmc_d);
         naive_bmmc.setArg(2, input_d);
         naive_bmmc.setArg(3, output_d);
+        cl::Event event;
+        CLguard(m_queue.enqueueNDRangeKernel(naive_bmmc, 
+            cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &event));
 
-        uint64_t nanoseconds = 0;
-        for (int it = 0; it < iterations; it++) {
-            cl::Event event;
-            CLguard(m_queue.enqueueNDRangeKernel(naive_bmmc, 
-                cl::NullRange, cl::NDRange(1 << BITS), cl::NDRange(1 << GROUP_BITS), nullptr, &event));
-            uint64_t start, end;
-            CLguard(m_queue.finish());
-            CLguard(event.getProfilingInfo(CL_PROFILING_COMMAND_START, &start));
-            CLguard(event.getProfilingInfo(CL_PROFILING_COMMAND_END, &end));
-            nanoseconds += end - start;
-        }
-        double NANOSECONDS_PER_SECOND = 1000000000;
-        double time = nanoseconds / ((double)iterations * NANOSECONDS_PER_SECOND); 
-
-        // Copy data back to the CPU
-        CLguard(m_queue.enqueueReadBuffer(output_d, CL_TRUE, 0, sizeof(int) * (1 << BITS), output_h.data()));
-        return { output_h, time };
+        return { event };
     }  
 
-    std::pair<std::vector<int>, double> fast_bpc(
-        const permutation& perm, const std::vector<int>& input_h, int iterations = 1)
+    std::vector<cl::Event> fast_bpc(
+        int n, const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d)
     {
-        // Compute the number of bits to encode indices.
-        int BITS = 0;
-        while ((1 << BITS) < input_h.size()) {
-            BITS++;
-        }
-        assert((1 << BITS) == input_h.size());
-        assert(perm.size() == BITS);
-
-        // Calculate the permutations
-        permutation remaining = perm;
-        std::vector<permutation> factors;
-        auto add_factor = [&factors, &remaining](const permutation& f) {
-            factors.push_back(f);
-            remaining = compose_perm(remaining, inverse_perm(factors.back()));
-            //std::cout << "factor: " << show_perm(factors.back()) << "\nremaining: " << show_perm(remaining) << "\n\n";
-        };
+        assert(perm.size() == n);
         
-        const int SEG_INIT = 8;
-        const int SEG_FIN = 6;
-        while (!is_perm_identity(remaining)) {
-            if ((factors.size() & 1) == 0) {
-                add_factor(sort_perm_range(remaining, 0, SEG_INIT));
-            }
-            else {
-                add_factor(sort_perm_range(remaining, SEG_FIN, BITS - SEG_FIN));
-            }
-        }
-
-        std::cout << "Num factors: " << factors.size() << "\n";
+        // Factorize the permutation
+        const int SEG_INIT = std::min(8, n);
+        const int SEG_FIN = std::min(5, n);
+        std::vector<permutation> factors = factorize_perm_init_fin(perm, SEG_INIT, n - SEG_FIN);
 
         // Allocate the buffers
-        std::vector<int> output_h(1 << BITS, 0);
-        cl::Buffer bmmc_d(m_context, CL_MEM_READ_ONLY, sizeof(uint64_t) * 64);
-        cl::Buffer buffer1_d(m_context, CL_MEM_READ_WRITE, sizeof(int) * (1 << BITS));
-        cl::Buffer buffer2_d(m_context, CL_MEM_READ_WRITE, sizeof(int) * (1 << BITS));
-
-        // Copy the input vector to the GPU
-        CLguard(m_queue.enqueueWriteBuffer(buffer1_d, CL_TRUE, 0, sizeof(int) * (1 << BITS), input_h.data()));
+        cl::Buffer bmmc_d(m_context, CL_MEM_READ_ONLY, sizeof(uint64_t) * n);
+        std::vector<cl::Event> events;
         
-        uint64_t nanoseconds = 0;    
-        for (int it = 0; it < iterations; it++) {
-            std::vector<cl::Event> events;
-            // Apply each factor
-            for (int i = 0; i < factors.size(); i++) {
-                // Upload the bmmc to the GPU
-                BMMC bmmc_h = perm_to_bmmc(factors[i]);
-                CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * 64, bmmc_h.data()));
+        // Apply each factor
+        for (int i = 0; i < factors.size(); i++) {
+            // Upload the bmmc to the GPU
+            BMMC bmmc_h = perm_to_bmmc(factors[i]);
+            CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * n, bmmc_h.data()));
 
-                // Choose which input and output to use
-                const auto& source_d = (i & 1) ? buffer2_d : buffer1_d;
-                const auto& dest_d   = (i & 1) ? buffer1_d : buffer2_d;
-                
-                cl::Event ev;
-                // This is a lower sort, use the MRC kernel.
-                if ((i & 1) == 0) {
-                    const int GROUP_BITS = SEG_INIT;
-                    cl::Kernel kernel = cl::Kernel(m_program, "mrc");
-                    kernel.setArg(0, BITS);
-                    kernel.setArg(1, GROUP_BITS);
-                    kernel.setArg(2, bmmc_d);
-                    kernel.setArg(3, source_d);
-                    kernel.setArg(4, dest_d);
-                    kernel.setArg(5, (1 << GROUP_BITS) * sizeof(uint64_t), NULL);
-                    CLguard(m_queue.enqueueNDRangeKernel(kernel, 
-                        cl::NullRange, cl::NDRange(1 << BITS), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
-                }
-                // This is a higher sort, use the naive BMMC kernel.
-                else {
-                    const int GROUP_BITS = SEG_FIN;
-                    cl::Kernel kernel = cl::Kernel(m_program, "naive_bmmc");
-                    kernel.setArg(0, BITS);
-                    kernel.setArg(1, bmmc_d);
-                    kernel.setArg(2, source_d);
-                    kernel.setArg(3, dest_d);
-                    CLguard(m_queue.enqueueNDRangeKernel(kernel, 
-                        cl::NullRange, cl::NDRange(1 << BITS), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
-                }    
-                events.push_back(ev);
+            cl::Event ev;
+            // This is a lower sort, use the MRC kernel.
+            if ((i & 1) == 0) {
+                const int GROUP_BITS = SEG_INIT;
+                cl::Kernel kernel = cl::Kernel(m_program, "mrc");
+                kernel.setArg(0, n);
+                kernel.setArg(1, GROUP_BITS);
+                kernel.setArg(2, bmmc_d);
+                kernel.setArg(3, input_d);
+                kernel.setArg(4, output_d);
+                kernel.setArg(5, (1 << GROUP_BITS) * sizeof(int), NULL);
+                CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                    cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
             }
+            // This is a higher sort, use the naive BMMC kernel.
+            else {
+                const int GROUP_BITS = SEG_FIN;
+                cl::Kernel kernel = cl::Kernel(m_program, "naive_bmmc");
+                kernel.setArg(0, n);
+                kernel.setArg(1, bmmc_d);
+                kernel.setArg(2, input_d);
+                kernel.setArg(3, output_d);
+                CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                    cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
+            }    
+            events.push_back(ev);
 
-            // Compute time measurements
-            m_queue.finish();
-            for (const auto& ev : events) {
-                uint64_t start, end;
-                CLguard(ev.getProfilingInfo(CL_PROFILING_COMMAND_START, &start));
-                CLguard(ev.getProfilingInfo(CL_PROFILING_COMMAND_END, &end));
-                nanoseconds += end - start;
-            }
+            // Copy the output back to the input. We will likely be smarter in the actual Futhark implementation.
+            CLguard(m_queue.enqueueCopyBuffer(output_d, input_d, 0, 0, (1 << n) * sizeof(int)));
         }
-        double NANOSECONDS_PER_SECOND = 1000000000;
-        double time = nanoseconds / ((double)iterations * NANOSECONDS_PER_SECOND); 
 
-        // Copy the data back to the CPU
-        CLguard(m_queue.enqueueReadBuffer((factors.size() & 1) ? buffer2_d : buffer1_d, CL_TRUE, 0, sizeof(int) * (1 << BITS), output_h.data()));
-        return { output_h, time };
+        return events;
     }
 
-    std::pair<std::vector<int>, double> scatter_bpc(
-        const permutation& perm, const std::vector<int>& input_h, int iterations = 1)
+    std::vector<cl::Event> fast_bpc_NEW(
+        int n, const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d)
     {
-        // Compute the number of bits to encode indices.
-        int BITS = 0;
-        while ((1 << BITS) < input_h.size()) {
-            BITS++;
-        }
-        assert((1 << BITS) == input_h.size());
-        assert(perm.size() == BITS);
-
+        assert(perm.size() == n);
+        
+        // Factorize the permutation
+        const int SEG_FIN = n <= 8 ? n : n - (n / 3); // how much of the final bits to sort
+        std::vector<permutation> factors = factorize_perm_fin(perm, SEG_FIN);
+        
         // Allocate the buffers
-        std::vector<int> output_h(1 << BITS, 0);
-        std::vector<int> idxs_h(1 << BITS, 0);
-        for (int i = 0; i < (1 << BITS); i++) {
-            idxs_h[i] = permute_bits(perm, i);
+        cl::Buffer bmmc_d(m_context, CL_MEM_READ_ONLY, sizeof(uint64_t) * n);
+        std::vector<cl::Event> events;
+        cl::Event ev;
+        
+        // Apply each factor
+        for (int i = 0; i < factors.size(); i++) {
+            int rot = is_rotate_perm(factors[i]);
+            
+            // This is a rotate (block swap) kernel
+            if (rot != -1) {
+                assert(i % 2 == 1);
+                // Ideally we want block_size >= 5, but since the group size is 2**(2*block_size), 
+                // the maximum is block_size = 4 on AMD GPUs.
+                // We also need to have block_size <= low and high. Otherwise we have some freedom in the choice of k.
+                const int LOW = n - rot;
+                const int HIGH = rot;
+                const int block_size = std::min(4, std::min(LOW, HIGH));
+                assert(0 <= LOW && 0 <= HIGH && LOW + HIGH == n);
+
+                cl::Kernel kernel = cl::Kernel(m_program, "block_swap");
+                kernel.setArg(0, LOW);
+                kernel.setArg(1, HIGH);
+                kernel.setArg(2, block_size);
+                kernel.setArg(3, input_d);
+                kernel.setArg(4, output_d);
+                kernel.setArg(5, sizeof(int) * ((1 << block_size) * ((1 << block_size) + 1)), nullptr);
+                CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                    cl::NullRange, cl::NDRange(1 << LOW, 1 << HIGH), cl::NDRange(1 << block_size, 1 << block_size), nullptr, &ev));    
+            }   
+            // This is a higher sort, use the naive BMMC kernel.
+            else {
+                assert(i % 2 == 0);
+                // Upload the bmmc to the GPU
+                BMMC bmmc_h = perm_to_bmmc(factors[i]);
+                CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * n, bmmc_h.data()));
+
+                const int GROUP_BITS = std::min(4, n - SEG_FIN);
+                cl::Kernel kernel = cl::Kernel(m_program, "naive_bmmc");
+                kernel.setArg(0, n);
+                kernel.setArg(1, bmmc_d);
+                kernel.setArg(2, input_d);
+                kernel.setArg(3, output_d);
+                CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                    cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
+            }    
+            events.push_back(ev);
+
+            // Copy the output back to the input. We will likely be smarter in the actual Futhark implementation.
+            CLguard(m_queue.enqueueCopyBuffer(output_d, input_d, 0, 0, (1 << n) * sizeof(int)));
         }
-        cl::Buffer bmmc_d(m_context, CL_MEM_READ_ONLY, sizeof(uint64_t) * 64);
-        cl::Buffer vals_d(m_context, CL_MEM_READ_ONLY, sizeof(int) * (1 << BITS));
-        cl::Buffer idxs_d(m_context, CL_MEM_READ_ONLY, sizeof(int) * (1 << BITS));
-        cl::Buffer output_d(m_context, CL_MEM_READ_WRITE, sizeof(int) * (1 << BITS));
+
+        return events;
+    }
+
+    std::vector<cl::Event> fast_bmmc(
+        int n, const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d)
+    {
+        // Calculate the LU decomposition
+        assert(bmmc.size() == n);
+        auto [U, L, perm] = bmmc_A_ULP_decomp(bmmc);
+        assert(bmmc == bmmc_mult_bmmc(bmmc_mult_bmmc(U, L), perm_to_bmmc(perm)));
+
+        // Factorize the permutation
+        const int K = std::min(5, n); // This is the size of the lsb block for the block swap
+        const int SEG_INIT = std::min(8, n);
+        const int SEG_FIN = std::min(5, n);
+        // We fuse the first block swap into the permutation
+        std::vector<permutation> factors = factorize_perm_init_fin(
+            //compose_perm(rotate_perm(K, n), perm), SEG_INIT, n - SEG_FIN);
+            perm, SEG_INIT, n - SEG_FIN);
+        std::vector<BMMC> bmmcs;
+        for (int i = 0; i < factors.size(); i++) {
+            bmmcs.push_back(perm_to_bmmc(factors[i]));
+        }
+        // Try to fuse L2 with the last factor
+        BMMC L2 = bmmc_rotate_cols(bmmc_rotate_rows(L, K), K);   
+        //bool fuse_L2 = (factors.size() & 1) != 0; 
+        bool fuse_L2 = false;
+        if (fuse_L2) {
+            bmmcs[bmmcs.size()-1] = bmmc_mult_bmmc(L2, bmmcs.back());
+        }
+        
+        // Allocate the buffers
+        cl::Buffer bmmc_d(m_context, CL_MEM_READ_ONLY, sizeof(uint64_t) * n);
+        std::vector<cl::Event> events;
+        cl::Event ev;
+
+        // Apply each factor
+        for (int i = 0; i < factors.size(); i++) {
+            // Upload the bmmc to the GPU
+            CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * n, bmmcs[i].data()));
+
+            // This is a lower sort, use the MRC kernel.
+            if ((i & 1) == 0) {
+                const int GROUP_BITS = SEG_INIT;
+                cl::Kernel kernel = cl::Kernel(m_program, "mrc");
+                kernel.setArg(0, n);
+                kernel.setArg(1, GROUP_BITS);
+                kernel.setArg(2, bmmc_d);
+                kernel.setArg(3, input_d);
+                kernel.setArg(4, output_d);
+                kernel.setArg(5, (1 << GROUP_BITS) * sizeof(int), NULL);
+                CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                    cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
+            }
+            // This is a higher sort, use the naive BMMC kernel.
+            else {
+                const int GROUP_BITS = SEG_FIN;
+                cl::Kernel kernel = cl::Kernel(m_program, "naive_bmmc");
+                kernel.setArg(0, n);
+                kernel.setArg(1, bmmc_d);
+                kernel.setArg(2, input_d);
+                kernel.setArg(3, output_d);
+                CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                    cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
+            }   
+            // Bookkeeping 
+            events.push_back(ev);
+            CLguard(m_queue.enqueueCopyBuffer(output_d, input_d, 0, 0, (1 << n) * sizeof(int)));
+        }
+
+        // Block swap
+        {
+            // Ideally we want block_size >= 5, but since the group size is 2**(2*block_size), 
+            // the maximum is block_size = 4 on AMD GPUs.
+            // We also need to have block_size <= low and high. Otherwise we have some freedom in the choice of k.
+            const int LOW = n - K;
+            const int HIGH = K;
+            const int block_size = std::min(4, std::min(LOW, HIGH));
+            assert(0 <= LOW && 0 <= HIGH && LOW + HIGH == n);
+
+            cl::Kernel kernel = cl::Kernel(m_program, "block_swap");
+            kernel.setArg(0, LOW);
+            kernel.setArg(1, HIGH);
+            kernel.setArg(2, block_size);
+            kernel.setArg(3, input_d);
+            kernel.setArg(4, output_d);
+            kernel.setArg(5, sizeof(int) * ((1 << block_size) * ((1 << block_size) + 1)), nullptr);
+            CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                cl::NullRange, cl::NDRange(1 << LOW, 1 << HIGH), cl::NDRange(1 << block_size, 1 << block_size), nullptr, &ev));    
+            events.push_back(ev);
+            CLguard(m_queue.enqueueCopyBuffer(output_d, input_d, 0, 0, (1 << n) * sizeof(int)));
+        }
+        
+        // Perform L2 if needed
+        if (!fuse_L2) {
+            CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * n, L2.data()));
+            
+            // This is the same k as in the transposition   
+            const int GROUP_BITS = K;
+            cl::Kernel kernel = cl::Kernel(m_program, "mrc");
+            kernel.setArg(0, n);
+            kernel.setArg(1, GROUP_BITS);
+            kernel.setArg(2, bmmc_d);
+            kernel.setArg(3, input_d);
+            kernel.setArg(4, output_d);
+            kernel.setArg(5, (1 << GROUP_BITS) * sizeof(int), NULL);
+            CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
+            events.push_back(ev);
+            CLguard(m_queue.enqueueCopyBuffer(output_d, input_d, 0, 0, (1 << n) * sizeof(int)));
+        }
+
+        // Block swap
+        {
+            // Ideally we want block_size >= 5, but since the group size is 2**(2*block_size), 
+            // the maximum is block_size = 4 on AMD GPUs.
+            // We also need to have block_size <= low and high. Otherwise we have some freedom in the choice of k.
+            const int LOW = K;
+            const int HIGH = n - K;
+            int block_size = std::min(4, std::min(LOW, HIGH));
+            assert(0 <= LOW && 0 <= HIGH && LOW + HIGH == n);
+            
+            cl::Kernel kernel = cl::Kernel(m_program, "block_swap");
+            kernel.setArg(0, LOW);
+            kernel.setArg(1, HIGH);
+            kernel.setArg(2, block_size);
+            kernel.setArg(3, input_d);
+            kernel.setArg(4, output_d);
+            kernel.setArg(5, sizeof(int) * ((1 << block_size) * ((1 << block_size) + 1)), nullptr);
+            CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                cl::NullRange, cl::NDRange(1 << LOW, 1 << HIGH), cl::NDRange(1 << block_size, 1 << block_size), nullptr, &ev));    
+            events.push_back(ev);
+            CLguard(m_queue.enqueueCopyBuffer(output_d, input_d, 0, 0, (1 << n) * sizeof(int)));
+        }
+        
+        // Perform U
+        {
+            CLguard(m_queue.enqueueWriteBuffer(bmmc_d, CL_TRUE, 0, sizeof(uint64_t) * n, U.data()));
+            // This is the same k as in the block swap   
+            const int GROUP_BITS = K;
+            cl::Kernel kernel = cl::Kernel(m_program, "mrc");
+            kernel.setArg(0, n);
+            kernel.setArg(1, GROUP_BITS);
+            kernel.setArg(2, bmmc_d);
+            kernel.setArg(3, input_d);
+            kernel.setArg(4, output_d);
+            kernel.setArg(5, (1 << GROUP_BITS) * sizeof(int), NULL);
+            CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &ev));
+            events.push_back(ev);
+            CLguard(m_queue.enqueueCopyBuffer(output_d, input_d, 0, 0, (1 << n) * sizeof(int)));
+        }
+
+        return events;
+    }
+
+    std::vector<cl::Event> scatter_bmmc(
+        int n, const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d)
+    {
+        // Allocate the buffers
+        assert(bmmc.size() == n);
+        std::vector<int> idxs_h(1 << n, 0);
+        for (int i = 0; i < (1 << n); i++) {
+            idxs_h[i] = bmmc_mult_vect(bmmc, i);
+        }
+        cl::Buffer idxs_d(m_context, CL_MEM_READ_ONLY, sizeof(int) * (1 << n));
         
         // Copy data to the GPU
-        CLguard(m_queue.enqueueWriteBuffer(vals_d, CL_TRUE, 0, sizeof(int) * (1 << BITS), input_h.data()));
-        CLguard(m_queue.enqueueWriteBuffer(idxs_d, CL_TRUE, 0, sizeof(int) * (1 << BITS), idxs_h.data()));
+        CLguard(m_queue.enqueueWriteBuffer(idxs_d, CL_TRUE, 0, sizeof(int) * (1 << n), idxs_h.data()));
         
         // Call the kernel
         const int GROUP_BITS = 5;
         cl::Kernel kernel = cl::Kernel(m_program, "scatter");
-        kernel.setArg(0, vals_d);
+        kernel.setArg(0, input_d);
         kernel.setArg(1, idxs_d);
         kernel.setArg(2, output_d);
-            
-        uint64_t nanoseconds = 0;
-        for (int it = 0; it < iterations; it++) {
-            cl::Event event;
-            CLguard(m_queue.enqueueNDRangeKernel(kernel, 
-                cl::NullRange, cl::NDRange(1 << BITS), cl::NDRange(1 << GROUP_BITS), nullptr, &event));
-            
-            uint64_t start, end;
-            CLguard(m_queue.finish());
-            CLguard(event.getProfilingInfo(CL_PROFILING_COMMAND_START, &start));
-            CLguard(event.getProfilingInfo(CL_PROFILING_COMMAND_END, &end));
-            nanoseconds += end - start;
-        }
-        double NANOSECONDS_PER_SECOND = 1000000000;
-        double time = nanoseconds / ((double)iterations * NANOSECONDS_PER_SECOND); 
-
-        // Copy data back to the CPU
-        CLguard(m_queue.enqueueReadBuffer(output_d, CL_TRUE, 0, sizeof(int) * (1 << BITS), output_h.data()));
+        cl::Event event;
+        CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+            cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &event));
         
-        return { output_h, time };
+        return { event };
+    }
+
+    std::vector<cl::Event> dummy(
+        int n, int k, const cl::Buffer& input_d, const cl::Buffer& output_d)
+    {
+        const int GROUP_BITS = std::min(k, 8);
+        
+        cl::Kernel kernel = cl::Kernel(m_program, "dummy");
+        kernel.setArg(0, n);
+        kernel.setArg(1, k);
+        kernel.setArg(2, input_d);
+        kernel.setArg(3, output_d);
+        cl::Event event;
+        CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &event));
+        
+        return { event };
+    }
+
+    
+    std::vector<cl::Event> copy(
+        int n, const cl::Buffer& input_d, const cl::Buffer& output_d)
+    {
+        const int GROUP_BITS = std::min(6, n);
+        
+        cl::Kernel kernel = cl::Kernel(m_program, "copy");
+        kernel.setArg(0, input_d);
+        kernel.setArg(1, output_d);
+        cl::Event event;
+        CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                cl::NullRange, cl::NDRange(1 << n), cl::NDRange(1 << GROUP_BITS), nullptr, &event));
+        
+        return { event };
+    }
+
+    std::vector<cl::Event> block_swap(
+        int low, int high, const cl::Buffer& input_d, const cl::Buffer& output_d)
+    {
+        int n = low + high;
+        int block_size = std::min(4, std::min(low, high));
+        
+        cl::Kernel kernel = cl::Kernel(m_program, "block_swap");
+        kernel.setArg(0, low);
+        kernel.setArg(1, high);
+        kernel.setArg(2, block_size);
+        kernel.setArg(3, input_d);
+        kernel.setArg(4, output_d);
+        kernel.setArg(5, sizeof(int) * ((1 << block_size) * ((1 << block_size) + 1)), nullptr);
+        cl::Event event;
+        CLguard(m_queue.enqueueNDRangeKernel(kernel, 
+                cl::NullRange, cl::NDRange(1 << low, 1 << high), cl::NDRange(1 << block_size, 1 << block_size), nullptr, &event));
+        
+        return { event };
+    }
+    
+    template<typename T>
+    double benchmark(
+        std::function<T()> random_state,
+        std::function<std::vector<cl::Event>(const T&, const cl::Buffer&, const cl::Buffer&)> f,
+        int input_size,
+        int iterations) 
+    {
+        // Generate the input
+        std::vector<int> input = random_array(input_size);
+
+        // Copy the input to the GPU
+        cl::Buffer input_d(m_context, CL_MEM_READ_WRITE, sizeof(int) * input.size());
+        cl::Buffer output_d(m_context, CL_MEM_READ_WRITE, sizeof(int) * input.size());
+        CLguard(m_queue.enqueueWriteBuffer(input_d, CL_TRUE, 0, sizeof(int) * input.size(), input.data()));
+
+        // Get the time measurements
+        std::vector<std::vector<double>> times(iterations, std::vector<double>());
+        for (int it = 0; it < iterations; it++) {
+            if (it % ((iterations / 10) + 1) == 0) {
+                std::cout << ".";
+                std::cout.flush();
+            }
+
+            std::vector<cl::Event> events = f(random_state(), input_d, output_d);
+
+            CLguard(m_queue.finish());
+            for (int i = 0; i < events.size(); i++) {
+                uint64_t start, end;
+                CLguard(events[i].getProfilingInfo(CL_PROFILING_COMMAND_START, &start));
+                CLguard(events[i].getProfilingInfo(CL_PROFILING_COMMAND_END, &end));
+                double delta = (end - start) / (double)1000000000;
+                times[it].push_back(delta);
+            } 
+        }
+        std::cout << "\n";
+        
+        // Display the time measurements, divided by event count
+        int max_event_count = 0;
+        for (const auto& ts : times) {
+            max_event_count = std::max(max_event_count, (int)ts.size());
+        }
+        for (int event_count = 1; event_count <= max_event_count; event_count++) {
+            // How many measurements we have for this count
+            int trace_count = 0;
+            std::vector<double> avg(event_count, 0);
+            for (const auto& ts : times) {
+                if (ts.size() == event_count) {
+                    trace_count++;
+                    for (int i = 0; i < event_count; i++) {
+                        avg[i] += ts[i];
+                    }
+                }
+            }
+            for (int i = 0; i < event_count; i++) {
+                avg[i] /= trace_count;
+            }
+            if (trace_count > 0) {
+                std::cout << "  avg time for " << event_count << " events:\n    ";
+                for (int i = 0; i < event_count; i++) {
+                    std::cout << avg[i] * 1000 << "ms  ";
+                }
+                std::cout << "\n";
+            }
+        }
+
+        // Compute the average time per iteration
+        float total = 0;
+        for (const auto& ts : times) {
+            for (double t : ts) {
+                total += t;
+            }
+        }
+        return total / iterations;
+    }
+
+    template <typename T>
+    void test(
+        std::function<T()> random_state,
+        std::function<std::vector<cl::Event>(const T& state, const cl::Buffer&, const cl::Buffer&)> f_test,
+        std::function<std::vector<int>(T& state, const std::vector<int>&)> f_expected,    
+        int input_size,
+        int iterations)
+    {   
+        cl::Buffer input_d(m_context, CL_MEM_READ_ONLY, sizeof(int) * input_size);
+        cl::Buffer output_d(m_context, CL_MEM_READ_WRITE, sizeof(int) * input_size);
+        
+        // Do the GPU computation
+        for (int it = 0; it < iterations; it++) {
+            if (it % ((iterations / 10) + 1) == 0) {
+                std::cout << ".";
+                std::cout.flush();
+            }
+            // Generate the input and the state
+            std::vector<int> input = random_array(input_size);
+            std::vector<int> output(input.size(), 0);
+            T state = random_state();
+            
+            // Do the computation on the GPU
+            CLguard(m_queue.enqueueWriteBuffer(input_d, CL_TRUE, 0, sizeof(int) * input.size(), input.data()));
+            std::vector<cl::Event> events = f_test(state, input_d, output_d);
+            CLguard(m_queue.enqueueReadBuffer(output_d, CL_TRUE, 0, sizeof(int) * input.size(), output.data()));
+    
+            // Compare the result to the expected one
+            assert(output == f_expected(state, input));
+        }
+        std::cout << std::endl;
     }
 };
 
-std::vector<int> cpu_bpc(const permutation& perm, const std::vector<int>& input)
+std::vector<int> cpu_bmmc(const BMMC& bmmc, const std::vector<int>& input)
 {
     std::vector<int> output(input.size(), 0);
     for (int i = 0; i < input.size(); i++) {
-        output[permute_bits(perm, i)] = input[i];
+        output[bmmc_mult_vect(bmmc, i)] = input[i];
     }
-
     return output;
 }
 
-bool vector_equal(const std::vector<int>& a, const std::vector<int>& b)
-{
-    if (a.size() != b.size()) {
-        return false;
-    }
-    for (int i = 0; i < a.size(); i++) {
-        if (a[i] != b[i]) {
-            return false;
-        }
-    }
-    return true;
+void benchmark_all(App& app, int bits, int iterations) 
+{  
+    std::vector<int> arr = random_array(1 << bits);
+    double time;
+
+    assert(bits >= 10);
+    time = app.benchmark<std::pair<int, int>>(
+        [&]() -> std::pair<int, int> 
+          { int low = std::clamp(rand() % bits, 5, bits-5); return { low, bits - low }; },
+        [&](const std::pair<int, int>& lh, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+          { return app.block_swap(lh.first, lh.second, input_d, output_d); },
+        1 << bits,
+        iterations);
+    std::cout << "Block swap avg: " << time * 1000 << "ms\n";
+    
+    //time = app.benchmark<int>(
+    //    [&]() -> int { return 0; },
+    //    [&](const int& unused, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+    //      { return app.copy(bits, input_d, output_d); },
+    //    1 << bits,
+    //    iterations);
+    //std::cout << "Copy avg: " << time * 1000 << "ms\n";
+
+    //time = app.benchmark<BMMC>(
+    //    [&]() -> BMMC { return random_invertible_bmmc(bits); },
+    //    [&](const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+    //      { return app.scatter_bmmc(bits, bmmc, input_d, output_d); },
+    //    1 << bits, 
+    //    iterations);
+    //std::cout << "Scatter bmmc avg: " << time * 1000 << "ms\n";
+
+    //time = app.benchmark<BMMC>(
+    //    [&]() -> BMMC { return random_invertible_bmmc(bits); },
+    //    //[&]() -> BMMC { return perm_to_bmmc(reverse_perm(bits)); },
+    //    [&](const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+    //      { return app.slow_bmmc(bits, bmmc, input_d, output_d); },
+    //    1 << bits, 
+    //    iterations);
+    //std::cout << "Slow bmmc avg: " << time * 1000 << "ms\n";
+        
+    time = app.benchmark<permutation>(
+        [&]() -> permutation { return random_perm(bits); },
+        [&](const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+          { return app.fast_bpc(bits, perm, input_d, output_d); },
+        1 << bits, 
+        iterations);
+    std::cout << "Fast bpc avg: " << time * 1000 << "ms\n";
+    
+    time = app.benchmark<permutation>(
+        [&]() -> permutation { return random_perm(bits); },
+        [&](const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+          { return app.fast_bpc_NEW(bits, perm, input_d, output_d); },
+        1 << bits, 
+        100);
+    std::cout << "Fast bpc NEW avg: " << time * 1000 << "ms\n";
+
+    time = app.benchmark<BMMC>(
+        [&]() -> BMMC { return random_invertible_bmmc(bits); },
+        //[&]() -> BMMC { return perm_to_bmmc(reverse_perm(bits)); },
+        [&](const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+          { return app.fast_bmmc(bits, bmmc, input_d, output_d); },
+        1 << bits, 
+        iterations);
+    std::cout << "Fast bmmc avg: " << time * 1000 << "ms\n";
 }
 
-int main() 
+void test_all(App& app, int bits, int iterations)
+{
+    std::cout << "Testing slow bmmc\n  ";
+    app.test<permutation>(
+        [&]() -> permutation { return random_perm(bits); },
+        [&](const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+            { return app.slow_bmmc(bits, perm_to_bmmc(perm), input_d, output_d); },
+        [&](const permutation& perm, const std::vector<int>& input) -> std::vector<int> 
+            { return cpu_bmmc(perm_to_bmmc(perm), input); },
+        1 << bits,
+        iterations);
+    
+    std::cout << "Testing scatter bmmc\n  ";
+    app.test<permutation>(
+        [&]() -> permutation { return random_perm(bits); },
+        [&](const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+            { return app.scatter_bmmc(bits, perm_to_bmmc(perm), input_d, output_d); },
+        [&](const permutation& perm, const std::vector<int>& input) -> std::vector<int> 
+            { return cpu_bmmc(perm_to_bmmc(perm), input); },
+        1 << bits,
+        iterations);
+    
+    std::cout << "Testing block swap\n  ";
+    app.test<std::pair<int, int>>(
+        [&]() -> std::pair<int, int> 
+          { int low = rand() % bits; return { low, bits - low }; },
+        [&](const std::pair<int, int>& lh, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+            { return app.block_swap(lh.first, lh.second, input_d, output_d); },
+        [&](const std::pair<int, int>& lh, const std::vector<int>& input) -> std::vector<int>
+            { return cpu_bmmc(perm_to_bmmc(rotate_perm(lh.second, lh.first + lh.second)), input); },
+        1 << bits,
+        iterations);
+    
+    std::cout << "Testing fast bpc\n  ";
+    app.test<permutation>(
+        [&]() -> permutation { return random_perm(bits); },
+        [&](const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+            { return app.fast_bpc(bits, perm, input_d, output_d); },
+        [&](const permutation& perm, const std::vector<int>& input) -> std::vector<int> 
+            { return cpu_bmmc(perm_to_bmmc(perm), input); },
+        1 << bits,
+        iterations);
+    
+    std::cout << "Testing fast bmmc\n  ";
+    app.test<BMMC>(
+        [&]() -> BMMC { return perm_to_bmmc(random_perm(bits)); },
+        [&](const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+        { return app.fast_bmmc(bits, bmmc, input_d, output_d); },
+        [&](const BMMC& bmmc, const std::vector<int>& input) -> std::vector<int> 
+        { return cpu_bmmc(bmmc, input); },
+        1 << bits,
+        iterations);
+}   
+
+int main()
 {
     App app = App(true);
 
-    //for (int bits = 15; bits <= 27; bits++) {
-    //    std::vector<int> arr = random_array(1 << bits);
-    //    auto [res1, time1] = app.slow_bpc(reverse_perm(bits), arr, 10);
-    //    auto [res2, time2] = app.fast_bpc(reverse_perm(bits), arr, 10);
-    //
-    //    std::cout << "Bits: " << bits << "\n";
-    //    std::cout << "Slow time avg:" << time1 * 1000 << "ms\n";
-    //    std::cout << "Fast time avg:" << time2 * 1000 << "ms\n";
-    //    std::cout << "    " << time1 / time2 << " speedup\n";
-    //}
+    int n = 27;
+    std::vector<std::pair<int, double>> times;
+    for (int k = 0; k <= n; k++) {
+        double time = app.benchmark<BMMC>(
+            [&]() -> BMMC { 
+            return diag_block_bmmc({ bmmc_identity(k), perm_to_bmmc(reverse_perm(n-k)) }); },
+            [&](const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d)
+            { return app.slow_bmmc(n, bmmc, input_d, output_d); },
+            1 << n,
+            50);
+        times.push_back({ k, time });
+    }
+    for (auto [k, t] : times) {
+        printf("coalesce=%2d  time=%.2fms\n", k, 1000 * t);
+    }
+    std::cout << "\n";
 
-    // Test the BMMC LU decompositions 
-    int n = 32;
-    BMMC A = perm_to_bmmc(random_perm(n));
-    bmmc_set(A, 3, 5, 1);
-    bmmc_set(A, 6, 5, 1);
-    auto [U, L, p] = bmmc_A_ULP_decomp(A);
-    
-    std::cout << show_bmmc(A) << std::endl;
-    std::cout << show_bmmc(U) << std::endl;
-    std::cout << show_bmmc(L) << std::endl;
-    std::cout << show_bmmc(perm_to_bmmc(p)) << std::endl;
-    
-    assert(A == bmmc_mult_bmmc(bmmc_mult_bmmc(U, L), perm_to_bmmc(p)));
+    //std::cout << "Testing fast bpc NEW\n  ";
+    //int bits = 15;
+    //app.test<permutation>(
+    //    [&]() -> permutation { return random_perm(bits); },
+    //    [&](const permutation& perm, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+    //        { return app.fast_bpc_NEW(bits, perm, input_d, output_d); },
+    //    [&](const permutation& perm, const std::vector<int>& input) -> std::vector<int> 
+    //        { return cpu_bmmc(perm_to_bmmc(perm), input); },
+    //    1 << bits,
+    //    100);
+
+
+    //for (int bits = 1; bits <= 14; bits++) {
+    //    test_all(app, bits, 10);
+    //}
+    //benchmark_all(app, 27, 100);
+
+    //const int n = 25;
+    //permutation perm = reverse_perm(n);
+    //const int SEG_INIT = std::min(8, n);
+    //const int SEG_FIN = std::min(5, n);
+    //std::vector<permutation> factors = factorize_perm_init_fin(perm, SEG_INIT, n - SEG_FIN);
+    //std::cout << show_bmmc(perm_to_bmmc(factors[1])) << "\n\n";
 
     return 0;
 }
+
+//int main()
+//{
+    // Test the BMMC LU decompositions 
+    //int n = 32;
+    //BMMC A = perm_to_bmmc(random_perm(n));
+    //bmmc_set(A, 3, 5, 1);
+    //bmmc_set(A, 6, 5, 1);
+    //auto [U, L, p] = bmmc_A_ULP_decomp(A);
+    //
+    //std::cout << show_bmmc(A) << std::endl;
+    //std::cout << show_bmmc(U) << std::endl;
+    //std::cout << show_bmmc(L) << std::endl;
+    //std::cout << show_bmmc(perm_to_bmmc(p)) << std::endl;
+    //
+    //assert(A == bmmc_mult_bmmc(bmmc_mult_bmmc(U, L), perm_to_bmmc(p)));
+    //
+    //return 0;
+//}

@@ -37,7 +37,12 @@ std::string show_bmmc(const BMMC& bmmc)
     std::stringstream buffer;
     for (int i = 0; i < bmmc.size(); i++) {
         for (int j = 0; j < bmmc.size(); j++) {
-            buffer << ((bmmc[i] >> j) & 1) << " ";
+            if ((bmmc[i] >> j) & 1) {
+                buffer << "1";
+            }
+            else {
+                buffer << ".";
+            }
         }
         buffer << "\n";
     }
@@ -123,6 +128,7 @@ int permute_bits(const permutation& perm, int idx)
     return res;
 }
 
+// This should return every permutation with the same probability
 permutation random_perm(int size)
 {
     if (size == 0) {
@@ -141,6 +147,7 @@ permutation random_perm(int size)
     perm[size-1] = last;
     return perm;
 }
+
 
 bool is_perm_valid(const permutation& perm)
 {
@@ -168,6 +175,15 @@ inline permutation transpose_perm(int i, int j, int size)
     permutation perm = identity_perm(size);
     perm[i] = j;
     perm[j] = i;
+    return perm;
+}
+
+inline permutation rotate_perm(int k, int size)
+{
+    permutation perm;
+    for (int i = 0; i < size; i++) {
+        perm.push_back((i + k) % size);
+    }
     return perm;
 }
 
@@ -322,7 +338,9 @@ std::tuple<permutation, BMMC, BMMC> bmmc_PA_LU_decomp(const BMMC& A)
     while (i < n && bmmc_get(A, i, 0) == 0) {
         i++;
     }
-    assert(i < n);
+    if (i >= n) {
+        throw std::invalid_argument("bmmc_PA_LU_decomp : the input matrix is not invertible");
+    }
     permutation p = transpose_perm(0, i, n);
     
     BMMC pA = bmmc_mult_bmmc(perm_to_bmmc(p), A);
@@ -339,6 +357,22 @@ std::tuple<permutation, BMMC, BMMC> bmmc_PA_LU_decomp(const BMMC& A)
     permutation p2 = compose_perm(p1_shift, p);
     BMMC L2 = block(1, 0, bmmc_mult_vect(perm_to_bmmc(p1), c1), L1);
     BMMC U2 = block(1, r1, 0, U1);
+
+    // Check L2 and U2 are of the correct form
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            if (i == j && (bmmc_get(L2, i, j) != 1 || bmmc_get(U2, i, j) != 1)) {
+                throw std::invalid_argument("bmmc_PA_LU_decomp : the input matrix is not invertible"); 
+            }
+            if (i < j && bmmc_get(L2, i, j) != 0) {
+                throw std::invalid_argument("bmmc_PA_LU_decomp : the input matrix is not invertible"); 
+            }
+            if (i > j && bmmc_get(U2, i, j) != 0) {
+                throw std::invalid_argument("bmmc_PA_LU_decomp : the input matrix is not invertible"); 
+            }
+        } 
+    }
+
     return { p2, L2, U2 };
 }
 
@@ -383,4 +417,187 @@ std::tuple<BMMC, BMMC, permutation> bmmc_A_ULP_decomp(const BMMC& A)
     BMMC L3 = bmmc_transpose(L2);
     BMMC U3 = bmmc_transpose(U2);
     return { U3, L3, p3 };
+}
+
+
+// Factorize a permutation into a sequence of permutations that act alternatively 
+// only on the initial (resp. final) bits of the input.
+// If factorize(p, k_init, k_fin) = [p0, p1, p2, p3, ...] then :
+//   p = ... . p3 . p2 . p1 . p0
+//   p0, p2, p4, ... act only on the k_init initial bits (lsbs)
+//   p1, p3, p5, ... act only on the k_fin final bits (msbs) 
+// It must hold that k_init + k_fin > p.size() for the method to work.
+std::vector<permutation> factorize_perm_init_fin(const permutation& perm, int k_init, int k_fin)
+{
+    int n = perm.size();
+    assert(0 <= k_init && k_init <= n);
+    assert(0 <= k_fin && k_fin <= n);
+    
+    if (k_init == n) {
+        return { perm };
+    }
+    assert(n < k_init + k_fin);
+
+    permutation remaining = perm;
+    std::vector<permutation> factors;
+    auto add_factor = [&factors, &remaining](const permutation& f) {
+        factors.push_back(f);
+        remaining = compose_perm(remaining, inverse_perm(f));
+    };
+    
+    while (!is_perm_identity(remaining)) {
+        if ((factors.size() & 1) == 0) {
+            add_factor(sort_perm_range(remaining, 0, k_init));
+        }
+        else {
+            add_factor(sort_perm_range(remaining, n - k_fin, k_fin));
+        }
+    }
+
+    // Check the result
+    permutation test = identity_perm(n);
+    for (const permutation& f : factors) {
+        test = compose_perm(f, test);
+    }
+    assert(test == perm);
+
+    return factors;
+}
+
+// We are only allowed to sort the k_fin last bits of perm.
+std::vector<permutation> factorize_perm_fin(const permutation& perm, int k_fin)
+{
+    int n = perm.size();
+    assert(0 <= k_fin && k_fin <= n);
+    
+    if (k_fin == n) {
+        return { perm };
+    }
+    assert(n < 2 * k_fin);
+
+    permutation remaining = perm;
+    std::vector<permutation> factors;
+    auto add_factor = [&factors, &remaining](const permutation& f) {
+        factors.push_back(f);
+        remaining = compose_perm(remaining, inverse_perm(f));
+    };
+    
+
+    while (!is_perm_identity(remaining)) {
+        // sort the end
+        if ((factors.size() & 1) == 0) {
+            add_factor(sort_perm_range(remaining, n - k_fin, k_fin));
+        }
+        // sort the start
+        else {
+            add_factor(rotate_perm(n - k_fin, n));
+            add_factor(sort_perm_range(remaining, n - k_fin, k_fin));
+            add_factor(rotate_perm(k_fin, n));
+        }
+    }
+
+    // Check the result
+    permutation test = identity_perm(n);
+    for (const permutation& f : factors) {
+        test = compose_perm(f, test);
+    }
+    assert(test == perm);
+
+    return factors;
+}
+
+
+// Rotate the rows k steps towards the bottom
+BMMC bmmc_rotate_rows(const BMMC& A, int k)
+{
+    BMMC B = bmmc_zero(A.size());
+    for (int i = 0; i < A.size(); i++) {
+        for (int j = 0; j < A.size(); j++) {
+            // Pay attention to the (int) conversion for the modulo.
+            int i2 = (i - k) % (int)A.size();
+            if (i2 < 0) { 
+                i2 += A.size();
+            }
+            assert(0 <= i2 && i2 < A.size());
+            bmmc_set(B, i, j, bmmc_get(A, i2, j));
+        }
+    }
+    return B;
+}
+
+// Rotate the columns k steps towards the right
+BMMC bmmc_rotate_cols(const BMMC& A, int k)
+{
+    BMMC B = bmmc_zero(A.size());
+    for (int i = 0; i < A.size(); i++) {
+        for (int j = 0; j < A.size(); j++) {
+            // Pay attention to the (int) conversion for the modulo.
+            int j2 = (j - k) % (int)A.size();
+            if (j2 < 0) { 
+                j2 += A.size();
+            }
+            assert(0 <= j2 && j2 < A.size());
+            bmmc_set(B, i, j, bmmc_get(A, i, j2));
+        
+        }
+    }
+    return B;
+}
+
+// This does not return every invertible bmmc : it is based on some 
+// crude heuristics.
+BMMC random_invertible_bmmc(int size)
+{
+    int random_bits = rand() % (2 * size);
+    while (random_bits > 0) {
+        BMMC bmmc = perm_to_bmmc(random_perm(size));
+        for (int i = 0; i < random_bits; i++) { 
+            bmmc_set(bmmc, rand() % size, rand() % size, 1); 
+        }
+        // Test if the matrix is invertible
+        try {
+            auto [U, L, p] = bmmc_A_ULP_decomp(bmmc);
+            assert(bmmc == bmmc_mult_bmmc(bmmc_mult_bmmc(U, L), perm_to_bmmc(p)));
+            return bmmc;
+        }
+        // The matrix was not invertible : try again with less random bits
+        catch (...) { 
+            random_bits--;
+            continue; 
+        }
+    }
+    return perm_to_bmmc(random_perm(size));
+}
+
+
+BMMC diag_block_bmmc(const std::vector<BMMC>& bmmcs)
+{
+    int n = 0;
+    for (const BMMC& A : bmmcs) {
+        n += A.size();
+    }
+
+    BMMC B = bmmc_zero(n);
+    int ofs = 0;
+    for (const BMMC& A : bmmcs) {
+        for (int i = 0; i < A.size(); i++) {
+            for (int j = 0; j < A.size(); j++) {
+                bmmc_set(B, ofs + i, ofs + j, bmmc_get(A, i, j));
+            }
+        }
+        ofs += A.size();
+    }
+    return B;
+}
+
+// if perm == rotate_perm(k, n) then return k else return -1
+int is_rotate_perm(const permutation& perm)
+{
+    int k = perm[0];
+    for (int i = 0; i < perm.size(); i++) {
+        if (perm[i] != (i+k) % perm.size()) {
+            return -1;
+        }
+    }
+    return k;
 }
