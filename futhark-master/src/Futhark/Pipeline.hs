@@ -28,7 +28,6 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Writer.Strict hiding (pass)
 import Control.Parallel
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -219,4 +218,3 @@ runPass pass prog = do
   verb <- asks $ (>= VeryVerbose) . futharkVerbose
   when verb $ addLog logged
   pure prog'
-

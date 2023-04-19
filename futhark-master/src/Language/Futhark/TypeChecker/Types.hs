@@ -22,6 +22,7 @@ module Language.Futhark.TypeChecker.Types
   )
 where
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
@@ -271,6 +272,10 @@ evalTypeExp (TEVar name loc) = do
         "Type constructor"
           <+> dquotes (hsep (pretty name : map pretty ps))
           <+> "used without any arguments."
+--
+evalTypeExp (TEParens te loc) = do
+  (te', svars, ts, ls) <- evalTypeExp te
+  pure (TEParens te' loc, svars, ts, ls)
 --
 evalTypeExp (TETuple ts loc) = do
   (ts', svars, ts_s, ls) <- unzip4 <$> mapM evalTypeExp ts
@@ -574,6 +579,7 @@ checkForDuplicateNamesInType = check mempty
       check seen t
     check _ TEArray {} = pure ()
     check _ TEVar {} = pure ()
+    check seen (TEParens te _) = check seen te
 
 -- | @checkTypeParams ps m@ checks the type parameters @ps@, then
 -- invokes the continuation @m@ with the checked parameters, while

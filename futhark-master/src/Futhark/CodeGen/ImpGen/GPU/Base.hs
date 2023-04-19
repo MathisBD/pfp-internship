@@ -46,7 +46,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Data.List (foldl')
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -1061,7 +1061,7 @@ virtualiseGroups SegVirt required_groups m = do
         (tvExp phys_group_id + i * sExt32 (kernelNumGroups constants))
     -- Make sure the virtual group is actually done before we let
     -- another virtual group have its way with it.
-    sOp $ Imp.Barrier Imp.FenceGlobal
+    sOp $ Imp.ErrorSync Imp.FenceGlobal
 virtualiseGroups _ _ m = do
   gid <- kernelGroupIdVar . kernelConstants <$> askEnv
   m $ Imp.le32 gid

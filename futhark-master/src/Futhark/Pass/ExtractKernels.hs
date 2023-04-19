@@ -153,7 +153,7 @@
 -- single kernel.
 module Futhark.Pass.ExtractKernels (extractKernels) where
 
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Data.Bifunctor (first)
@@ -609,7 +609,8 @@ onMap path (MapLoop pat aux w lam arrs) = do
       exploitInnerParallelism path' =
         runDistNestT (env path') $
           distributeMapBodyStms acc (bodyStms $ lambdaBody lam)
-      exploitOuterParallelism path' = do
+
+  let exploitOuterParallelism path' = do
         let lam' = soacsLambdaToGPU lam
         runDistNestT (env path') $
           distribute $

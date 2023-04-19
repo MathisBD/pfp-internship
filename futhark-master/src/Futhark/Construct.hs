@@ -120,6 +120,7 @@ module Futhark.Construct
   )
 where
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Data.List (foldl', sortOn, transpose)
@@ -127,7 +128,6 @@ import Data.Map.Strict qualified as M
 import Futhark.Builder
 import Futhark.IR
 import Futhark.Util (maybeNth)
-
 
 -- | @letSubExp desc e@ binds the expression @e@, which must produce a
 -- single value.  Returns a t'SubExp' corresponding to the resulting

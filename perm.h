@@ -427,7 +427,9 @@ std::tuple<BMMC, BMMC, permutation> bmmc_A_ULP_decomp(const BMMC& A)
 //   p0, p2, p4, ... act only on the k_init initial bits (lsbs)
 //   p1, p3, p5, ... act only on the k_fin final bits (msbs) 
 // It must hold that k_init + k_fin > p.size() for the method to work.
-std::vector<permutation> factorize_perm_init_fin(const permutation& perm, int k_init, int k_fin)
+// 'start_with_init' controls whether p0 is an initial permutation or a final permutation.
+std::vector<permutation> factorize_perm_init_fin(
+    const permutation& perm, int k_init, int k_fin, bool start_with_init = true)
 {
     int n = perm.size();
     assert(0 <= k_init && k_init <= n);
@@ -446,7 +448,7 @@ std::vector<permutation> factorize_perm_init_fin(const permutation& perm, int k_
     };
     
     while (!is_perm_identity(remaining)) {
-        if ((factors.size() & 1) == 0) {
+        if ((start_with_init && factors.size() % 2 == 0) || (!start_with_init && factors.size() % 2 == 1)) {
             add_factor(sort_perm_range(remaining, 0, k_init));
         }
         else {

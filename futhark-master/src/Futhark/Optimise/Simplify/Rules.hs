@@ -71,12 +71,12 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Copy v)
     -- simplifier applies bottom-up rules in a kind of deepest-first
     -- order.
     not (patElemName d `UT.isInResult` used)
-      || patElemName d `UT.isConsumed` used
+      || patElemName d
+      `UT.isConsumed` used
       -- Always OK to remove the copy if 'v' has no aliases and is never
       -- used again.
       || (v_is_fresh && v_not_used_again),
-    (v_not_used_again && consumable) 
-      || not (patElemName d `UT.isConsumed` used) =
+    (v_not_used_again && consumable) || not (patElemName d `UT.isConsumed` used) =
       Simplify $ auxing aux $ letBindNames [patElemName d] $ BasicOp $ SubExp $ Var v
   where
     v_not_used_again = not (v `UT.used` used)
@@ -203,7 +203,7 @@ withAccTopDown vtable (Let pat aux (WithAcc inputs lam)) = Simplify . auxing aux
       pure $ Just x
 withAccTopDown _ _ = Skip
 
-elimUpdates :: (ASTRep rep, TraverseOpStms rep) => [VName] -> Body rep -> (Body rep, [VName])
+elimUpdates :: forall rep. (ASTRep rep, TraverseOpStms rep) => [VName] -> Body rep -> (Body rep, [VName])
 elimUpdates get_rid_of = flip runState mempty . onBody
   where
     onBody body = do
@@ -219,7 +219,7 @@ elimUpdates get_rid_of = flip runState mempty . onBody
     onExp = mapExpM mapper
       where
         mapper =
-          identityMapper
+          (identityMapper :: forall m. Monad m => Mapper rep rep m)
             { mapOnOp = traverseOpStms (\_ stms -> onStms stms),
               mapOnBody = \_ body -> onBody body
             }

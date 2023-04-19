@@ -2,6 +2,7 @@
 module Futhark.CLI.Literate (main) where
 
 import Codec.BMP qualified as BMP
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State hiding (State)
 import Data.Bifunctor (first, second)
@@ -530,10 +531,10 @@ formatDataForGnuplot = T.unlines . map line . transpose . map valueElems
     line = T.unwords . map prettyText
 
 imgBlock :: FilePath -> T.Text
-imgBlock f = "\n\n![](" <> T.pack f <> ")\n\n"
+imgBlock f = "![](" <> T.pack f <> ")\n"
 
 videoBlock :: VideoParams -> FilePath -> T.Text
-videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
+videoBlock opts f = "![](" <> T.pack f <> ")" <> opts' <> "\n"
   where
     opts'
       | all T.null [loop, autoplay] =
@@ -718,14 +719,7 @@ processDirective env (DirectiveRes e) = do
     newFileContents env (Nothing, "eval.txt") $ \resultf -> do
       v <- either nope pure =<< evalExpToGround literateBuiltin (envServer env) e
       liftIO $ T.writeFile resultf $ prettyText v
-  pure $
-    T.unlines
-      [ "",
-        "```",
-        result,
-        "```",
-        ""
-      ]
+  pure $ T.unlines ["```", result, "```"]
   where
     nope t =
       throwError $ "Cannot show value of type " <> prettyText t
@@ -1021,8 +1015,8 @@ data Failure = Failure | Success
 
 processBlock :: Env -> Block -> IO (Failure, T.Text, Files)
 processBlock _ (BlockCode code)
-  | T.null code = pure (Success, "\n", mempty)
-  | otherwise = pure (Success, "\n```futhark\n" <> code <> "```\n\n", mempty)
+  | T.null code = pure (Success, mempty, mempty)
+  | otherwise = pure (Success, "```futhark\n" <> code <> "```\n", mempty)
 processBlock _ (BlockComment pretty) =
   pure (Success, pretty, mempty)
 processBlock env (BlockDirective directive text) = do
@@ -1039,7 +1033,7 @@ processBlock env (BlockDirective directive text) = do
   (r, files) <- runScriptM $ processDirective env' directive
   case r of
     Left err -> failed prompt err files
-    Right t -> pure (Success, prompt <> t, files)
+    Right t -> pure (Success, prompt <> "\n" <> t, files)
   where
     failed prompt err files = do
       let message = prettyTextOneLine directive <> " failed:\n" <> err <> "\n"
@@ -1072,7 +1066,7 @@ processScript env script = do
   (failures, outputs, files) <-
     unzip3 <$> mapM (processBlock env) script
   cleanupImgDir env $ mconcat files
-  pure (foldl' min Success failures, mconcat outputs)
+  pure (foldl' min Success failures, T.intercalate "\n" outputs)
 
 commandLineOptions :: [FunOptDescr Options]
 commandLineOptions =

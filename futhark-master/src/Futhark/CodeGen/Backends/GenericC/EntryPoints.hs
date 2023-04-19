@@ -6,7 +6,8 @@ module Futhark.CodeGen.Backends.GenericC.EntryPoints
   )
 where
 
-import Control.Monad.Reader
+import Control.Monad
+import Control.Monad.Reader (asks)
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
@@ -133,9 +134,6 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
 entryName :: Name -> T.Text
 entryName = ("entry_" <>) . escapeName . nameToText
 
-tuningParamsName :: Name -> T.Text
-tuningParamsName = ("tuning_params_for_" <>) . escapeName . nameToText
-
 onEntryPoint ::
   [C.BlockItem] ->
   [Name] ->
@@ -152,7 +150,6 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
   decl_mem <- declAllocatedMem
 
   entry_point_function_name <- publicName $ entryName ename
-  tuning_params_name <- publicName $ tuningParamsName ename
 
   (inputs', unpack_entry_inputs) <- prepareEntryInputs $ map snd args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
@@ -168,10 +165,6 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
                                      ($ty:ctx_ty *ctx,
                                       $params:entry_point_output_params,
                                       $params:entry_point_input_params);|]
-
-  headerDecl
-    MiscDecl
-    [C.cedecl|const int* $id:tuning_params_name(void);|]
 
   let checks = catMaybes entry_point_input_checks
       check_input =

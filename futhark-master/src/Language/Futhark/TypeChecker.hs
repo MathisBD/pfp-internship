@@ -18,10 +18,11 @@ module Language.Futhark.TypeChecker
   )
 where
 
+import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor (first, second)
 import Data.Either
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
@@ -552,6 +553,15 @@ checkTypeBind ::
 checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
   checkTypeParams tps $ \tps' -> do
     (te', svars, RetType dims t, l') <- bindingTypeParams tps' $ checkTypeExp te
+
+    let (witnessed, _) = determineSizeWitnesses t
+    case L.find (`S.notMember` witnessed) svars of
+      Just _ ->
+        typeError (locOf te) mempty . withIndexLink "anonymous-nonconstructive" $
+          "Type abbreviation contains an anonymous size not used constructively as an array size."
+      Nothing ->
+        pure ()
+
     let elab_t = RetType (svars ++ dims) t
 
     let used_dims = freeInType t
@@ -655,7 +665,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
           "size-polymorphic-entry"
           "Entry point functions must not be size-polymorphic in their return type."
   | p : _ <- filter nastyParameter params =
-      warn loc $
+      warn p $
         "Entry point parameter\n"
           </> indent 2 (pretty p)
           </> "\nwill have an opaque type, so the entry point will likely not be callable."

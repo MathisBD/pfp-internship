@@ -25,16 +25,19 @@ void kernel naive_bmmc(
     global int* out_vect) 
 {
     size_t id = get_global_id(0);
-    size_t lid = get_local_id(0);
-    size_t gid = get_group_id(0);
+
+    // Read in the data. Doing this before the matrix multiplication
+    // allows the memory transactions to run at the same time as the following scalar code
+    // (trust me I benchmarked it).
+    int data = in_vect[id];
 
     // Do the matrix multiplication
     ulong out_idx = 0;
     for (int i = 0; i < n; i++) {
         out_idx |= (popcount(bmmc[i] & id) & 1) << i;
     }
-    // Do the actual copy
-    out_vect[out_idx] = in_vect[id];
+    // Write out the data
+    out_vect[out_idx] = data;
 }
 
 
@@ -52,11 +55,12 @@ void kernel mrc(
     size_t gid = get_group_id(0);
 
     // Read to the buffer
+    int data = in_vect[id];
     ulong buffer_idx = 0;
     for (int i = 0; i < k; i++) {
         buffer_idx |= (popcount(bmmc[i] & id) & 1) << i;
     }
-    buffer[buffer_idx] = in_vect[id];
+    buffer[buffer_idx] = data;
     
     // Synchronize
     barrier(CLK_LOCAL_MEM_FENCE);

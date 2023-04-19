@@ -5,6 +5,7 @@
 -- program to a core Futhark program.
 module Futhark.Internalise.Exps (transformProg) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -2150,6 +2151,9 @@ partitionWithSOACS k lam arrs = do
 typeExpForError :: E.TypeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
   pure [ErrorString $ prettyText qn]
+typeExpForError (E.TEParens te _) = do
+  msg <- typeExpForError te
+  pure $ ["("] <> msg <> [")"]
 typeExpForError (E.TEUnique te _) =
   ("*" :) <$> typeExpForError te
 typeExpForError (E.TEDim dims te _) =

@@ -75,6 +75,7 @@ module Futhark.IR.Syntax.Core
 where
 
 import Control.Category
+import Control.Monad
 import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
@@ -246,6 +247,9 @@ instance Bitraversable TypeBase where
   bitraverse _ g (Acc arrs ispace ts u) = Acc arrs ispace ts <$> g u
   bitraverse _ _ (Mem s) = pure $ Mem s
 
+instance Functor (TypeBase shape) where
+  fmap = second
+
 instance Bifunctor TypeBase where
   bimap = bimapDefault
 
@@ -304,7 +308,7 @@ newtype Certs = Certs {unCerts :: [VName]}
   deriving (Eq, Ord, Show)
 
 instance Semigroup Certs where
-  Certs x <> Certs y = Certs (x <> y)
+  Certs x <> Certs y = Certs (x <> filter (`notElem` x) y)
 
 instance Monoid Certs where
   mempty = Certs mempty

@@ -286,6 +286,9 @@ data RetTypeBase dim as = RetType
 instance Bitraversable RetTypeBase where
   bitraverse f g (RetType dims t) = RetType dims <$> bitraverse f g t
 
+instance Functor (RetTypeBase dim) where
+  fmap = second
+
 instance Bifunctor RetTypeBase where
   bimap = bimapDefault
 
@@ -314,6 +317,9 @@ instance Bitraversable ScalarTypeBase where
     Arrow <$> g als <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f g t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
+instance Functor (ScalarTypeBase dim) where
+  fmap = second
+
 instance Bifunctor ScalarTypeBase where
   bimap = bimapDefault
 
@@ -334,6 +340,9 @@ instance Bitraversable TypeBase where
   bitraverse f g (Scalar t) = Scalar <$> bitraverse f g t
   bitraverse f g (Array a u shape t) =
     Array <$> g a <*> pure u <*> traverse f shape <*> bitraverse f pure t
+
+instance Functor (TypeBase dim) where
+  fmap = second
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
@@ -412,11 +421,13 @@ deriving instance Ord (SizeExp NoInfo VName)
 
 deriving instance Ord (SizeExp Info VName)
 
--- | An unstructured type with type variables and possibly shape
--- declarations - this is what the user types in the source program.
--- These are used to construct 'TypeBase's in the type checker.
+-- | An unstructured syntactic type with type variables and possibly
+-- shape declarations - this is what the user types in the source
+-- program.  These are used to construct 'TypeBase's in the type
+-- checker.
 data TypeExp f vn
   = TEVar (QualName vn) SrcLoc
+  | TEParens (TypeExp f vn) SrcLoc
   | TETuple [TypeExp f vn] SrcLoc
   | TERecord [(Name, TypeExp f vn)] SrcLoc
   | TEArray (SizeExp f vn) (TypeExp f vn) SrcLoc
@@ -443,6 +454,7 @@ instance Located (TypeExp f vn) where
   locOf (TETuple _ loc) = locOf loc
   locOf (TERecord _ loc) = locOf loc
   locOf (TEVar _ loc) = locOf loc
+  locOf (TEParens _ loc) = locOf loc
   locOf (TEUnique _ loc) = locOf loc
   locOf (TEApply _ _ loc) = locOf loc
   locOf (TEArrow _ _ _ loc) = locOf loc

@@ -14,7 +14,7 @@ module Futhark.CodeGen.ImpGen.GPU.Group
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Data.Bifunctor
 import Data.List (partition, zip4)
 import Data.Map.Strict qualified as M
@@ -282,8 +282,10 @@ compileGroupExp (Pat [pe]) (BasicOp (Opaque _ se)) =
 compileGroupExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
-compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) =
-  updateAcc acc is vs
+compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) = do
+  ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
+  sWhen (ltid .==. 0) $ updateAcc acc is vs
+  sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) = do
   flat <- newVName "rep_flat"
   is <- replicateM (arrayRank dest_t) (newVName "rep_i")
