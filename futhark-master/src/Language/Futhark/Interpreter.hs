@@ -493,7 +493,7 @@ writeArray :: [Indexing] -> Value -> Value -> Maybe Value
 writeArray slice x y = runIdentity $ updateArray (\_ y' -> pure y') slice x y
 
 updateArray ::
-  Monad m =>
+  (Monad m) =>
   (Value -> Value -> m Value) ->
   [Indexing] ->
   Value ->
@@ -1901,7 +1901,9 @@ checkEntryArgs entry args entry_t
       | null param_ts =
           "Entry point " <> dquotes (prettyName entry) <> " is not a function."
       | otherwise =
-          "Entry point " <> dquotes (prettyName entry) <> " expects input of type(s)"
+          "Entry point "
+            <> dquotes (prettyName entry)
+            <> " expects input of type(s)"
             </> indent 2 (stack (map pretty param_ts))
 
 -- | Execute the named function on the given arguments; may fail

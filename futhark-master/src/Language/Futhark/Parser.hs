@@ -49,7 +49,7 @@ parseType = parse futharkType
 -- | Parse an Futhark expression incrementally from monadic actions, using the
 -- 'FilePath' as the source name for error messages.
 parseExpIncrM ::
-  Monad m =>
+  (Monad m) =>
   m T.Text ->
   FilePath ->
   T.Text ->
@@ -60,7 +60,7 @@ parseExpIncrM fetch file program =
 -- | Parse either an expression or a declaration incrementally;
 -- favouring declarations in case of ambiguity.
 parseDecOrExpIncrM ::
-  Monad m =>
+  (Monad m) =>
   m T.Text ->
   FilePath ->
   T.Text ->
