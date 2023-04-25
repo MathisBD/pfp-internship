@@ -1646,6 +1646,8 @@ isIntrinsicFunction qname args loc = do
       internaliseHist 2 desc rf dest op ne buckets img loc
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img loc
+    handleSOACs [masks, lam, arr] "parm" = 
+      error "handleSOACs : not implemented for 'parm' yet"
     handleSOACs _ _ = Nothing
 
     handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->

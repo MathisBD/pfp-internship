@@ -884,6 +884,17 @@ intrinsics =
                    $ uarray_a
                    $ shape [m, k, l]
                ),
+               ( "parm",
+                 IntrinsicPolyFun
+                   [tp_a, tp_b, sp_n, sp_m, sp_k]
+                   [ (Observe, Array () Nonunique (shape [k]) (Prim $ Signed Int64)),
+                     (Observe, array_a (shape [m]) `arr` array_b (shape [m])),
+                     (Observe, array_a (shape [n]))
+                   ]
+                   $ RetType []
+                   $ uarray_b
+                   $ shape [n]
+               ),
                ( "map",
                  IntrinsicPolyFun
                    [tp_a, tp_b, sp_n]
