@@ -822,14 +822,18 @@ int main()
 {
     App app = App(true);
 
-    int n = 27;
-    double time = app.benchmark<BMMC>(
-        [&]() -> BMMC { return perm_to_bmmc(reverse_perm(n)); },
-        [&](const BMMC& bmmc, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
-          { return app.slow_bmmc(n, bmmc, input_d, output_d); },
-        1 << n, 
-        10);
-    std::cout << "Slow bmmc avg: " << time * 1000 << "ms\n";
+    int n = 25;
+    assert(n >= 10);
+    for (int low = 5; low <= n-5; low++) {
+        double time = app.benchmark<std::pair<int, int>>(
+            [&]() -> std::pair<int, int> { return { low, n - low }; },
+            [&](const std::pair<int, int>& lh, const cl::Buffer& input_d, const cl::Buffer& output_d) -> std::vector<cl::Event>
+            { return app.block_swap(lh.first, lh.second, input_d, output_d); },
+            1 << n,
+            100, 
+            false);
+        std::cout << "k = " << low << "   avg = " << time * 1000 << "ms\n";
+    }
 }
 
 // Copy VS block bit-reversal permutation, varying array sizes.

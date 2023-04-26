@@ -73,6 +73,7 @@ import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty (Doc, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
+import qualified Language.Futhark.Parser.Lexer.Wrapper as arrays
 
 -- | A second-order array combinator (SOAC).
 data SOAC rep
@@ -119,6 +120,11 @@ data SOAC rep
     --
     -- The final lambda produces indexes and values for the 'HistOp's.
     Hist SubExp [VName] [HistOp rep] (Lambda rep)
+  | -- | @Parm <mask-length> <mask-array> <input-length> <input-arrays> <lambda>
+    -- 
+    -- <mask-array> is a single array of shape [<masks-length>]. The same masks are used for every input.
+    -- <input-arrays> is a list of input arrays, all having the shape [<length>].
+    Parm SubExp VName SubExp [VName] (Lambda rep)
   | -- FIXME: this should not be here
     JVP (Lambda rep) [SubExp] [SubExp]
   | -- FIXME: this should not be here

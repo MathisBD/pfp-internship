@@ -75,7 +75,7 @@ void kernel mrc(
 
 
 // This implements a special class of index bit permutations,
-// that swaps the 'low' lowest bits and the 'high' highest bits of the index.
+// that swap the 'low' lowest bits and the 'high' highest bits of the index.
 // The block should have (1 << block_size) rows and ((1 << block_size) + 1) columns : 
 // the +1 is to avoid bank conflicts.
 // We should also have block_size <= min(low, high).
