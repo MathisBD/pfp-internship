@@ -25,10 +25,12 @@ __global__ void block_swap_kernel(
     const int* in_vect,
     int* out_vect)
 {
-    __shared__ int block[(1 << BLOCK_SIZE) * (1 << BLOCK_SIZE)];
+    __shared__ int block[((1 << BLOCK_SIZE) + 1) * (1 << BLOCK_SIZE)];
 
-    size_t gi = blockIdx.y;
-    size_t gj = blockIdx.x;
+    size_t gi = blockIdx.x / ((1 << low) / (1 << BLOCK_SIZE));
+    size_t gj = blockIdx.x % ((1 << low) / (1 << BLOCK_SIZE));
+    //size_t gi = blockIdx.y;
+    //size_t gj = blockIdx.x;
     size_t li = threadIdx.y;
     size_t lj = threadIdx.x;
 
@@ -45,4 +47,29 @@ __global__ void block_swap_kernel(
     int out_j = (gi << BLOCK_SIZE) + lj;
     out_vect[(out_i << high) + out_j] = block[lj * ((1 << BLOCK_SIZE) + 1) + li];
 }
+
+__global__ void bit_reverse_kernel(
+	int n,
+	const int* in_vect,
+	int* out_vect)
+{
+	__shared__ int block[((1 << BLOCK_SIZE) + 1) * (1 << BLOCK_SIZE)];
+
+	size_t g = blockIdx.x;
+	size_t i = threadIdx.y;
+	size_t j = threadIdx.x;
+
+	// Read the input block
+	size_t in_addr = (i << (n - BLOCK_SIZE)) | (g << BLOCK_SIZE) | j;
+	block[i * ((1 << BLOCK_SIZE) + 1) + j] = in_vect[in_addr];
+
+	// Synchronize
+	__syncthreads();
+
+	// Write the ouput block
+	size_t out_addr = (j << (n - BLOCK_SIZE)) | (g << BLOCK_SIZE) | i;
+   	out_addr = __brevll(out_addr) >> (64 - n);
+	out_vect[out_addr] = block[j * ((1 << BLOCK_SIZE) + 1) + i];
+}
+
 
