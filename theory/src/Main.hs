@@ -255,10 +255,10 @@ isConsecutive xs = sort xs == [minimum xs..maximum xs]
   
 main :: IO ()
 main = do 
-  let n = 8
-      p = 3
-      perm = (n-1) : [0..n-2]
-      q = tally (\i -> perm !! i < p) [p..n-1]
+  let n = 10
+      p = 4
+  perm <- randomPerm n
+  let q = tally (\i -> perm !! i < p) [p..n-1]
       xs = [0..2^n - 1]
       ys1 = doPermNaive perm xs
       ys2 = doPerm perm p q xs
