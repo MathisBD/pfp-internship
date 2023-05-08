@@ -9,7 +9,7 @@ module Bmmc (
   transformInt
 ) where
 
-import Data.Bits
+import Data.Bits ( Bits(shiftR, xor, (.|.), shiftL) )
 import Data.List ( intercalate, find )
 import Data.Maybe ( isJust )
 import qualified Data.Vector.Unboxed as U

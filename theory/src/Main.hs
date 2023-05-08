@@ -8,6 +8,8 @@ import Data.Traversable ( for )
 import System.Random ( randomIO, randomRIO )
 import qualified Bmmc as B
 import qualified Data.Vector.Unboxed as U
+import qualified Perm as P
+import KernelGen ( generateBP, generateBPIter )
 
 
 -- Seperate a list in two.
@@ -150,57 +152,23 @@ tally :: (a -> Bool) -> [a] -> Int
 tally f [] = 0
 tally f (x:xs) = if f x then 1 + tally f xs else tally f xs      
         
--- The permutation is defined as the mapping between the indices
--- and the corresponding elements.
-type Perm = [Int]
 
--- Generate all permutations on n elements.
-genPerms :: Int -> [Perm]
-genPerms 0 = [[]]
-genPerms n = do
-  -- Choose the image of the first element
-  first <- [0..n-1]
-  -- Choose the image of the other n-1 elements
-  rest <- genPerms (n-1)
-  -- Combine them 
-  pure $ first : map (\x -> if x < first then x else x + 1) rest
-
-reversePerm :: Int -> Perm
-reversePerm n = reverse [0..n-1]
-
-permToMatrix :: Perm -> B.BMatrix 
-permToMatrix perm = B.make n n $ \i j -> i == perm !! j
-  where n = length perm
-
-inversePerm :: Perm -> Perm 
-inversePerm perm = [ indexOf i perm | i <- [0..n-1] ]
-  where n = length perm
-        indexOf i [] = undefined
-        indexOf i (x:xs) 
-          | i == x    = 0
-          | otherwise = 1 + indexOf i xs
-
-applyPerm :: Perm -> [a] -> [a]
-applyPerm perm xs = [ xs !! (inv !! i) | i <- [0..n-1]]
-  where n = length perm
-        inv = inversePerm perm
-
-stitchLow :: Perm -> [a] -> [a] -> [a] -> [a] 
+stitchLow :: P.Perm -> [a] -> [a] -> [a] -> [a] 
 stitchLow perm high middle low = low ++ go (length low) high middle
   where p = length low
-        n = length perm
+        n = P.size perm
         go i high middle
           | i >= n        = []
-          | perm !! i < p = head high : go (i+1) (tail high) middle
+          | P.apply perm i < p = head high : go (i+1) (tail high) middle
           | otherwise     = head middle : go (i+1) high (tail middle)
 
-stitchHigh :: Perm -> [a] -> [a] -> [a] -> [a] 
+stitchHigh :: P.Perm -> [a] -> [a] -> [a] -> [a] 
 stitchHigh perm high middle low = low ++ go (length low) high middle
   where p = length high
-        n = length perm
+        n = P.size perm
         go i high middle
           | i >= n        = []
-          | perm !! i < p = head high : go (i+1) (tail high) middle
+          | P.apply perm i < p = head high : go (i+1) (tail high) middle
           | otherwise     = head middle : go (i+1) high (tail middle)
 
 
@@ -213,18 +181,18 @@ fromBits []     = 0
 fromBits (b:bs) = b + 2 * fromBits bs
 
 -- returns (read, write) access
-generateAccesses :: Perm -> Int -> Int -> Int -> Int -> Int -> (Int, Int)
+generateAccesses :: P.Perm -> Int -> Int -> Int -> Int -> Int -> (Int, Int)
 generateAccesses perm p q g i j
   | not (0 <= i && i < 2^q && 0 <= g && g < 2^(n-p-q) && 0 <= j && j < 2^p) = undefined
   | otherwise = (read, write)
-    where n     = length perm
+    where n     = P.size perm
           read  = fromBits $ 
                     stitchLow perm (toBits q i) (toBits (n-p-q) g) (toBits p j)
           write = fromBits $ 
-                    applyPerm perm $
+                    P.permute perm $
                       stitchHigh perm (toBits p j) (toBits (n-p-q) g) (toBits q i)
 
-doPermGroup :: Perm -> Int -> Int -> Int -> U.Vector Int -> [(Int, Int)]
+doPermGroup :: P.Perm -> Int -> Int -> Int -> U.Vector Int -> [(Int, Int)]
 doPermGroup perm p q g input =
   let shared = foldl (doRead input) (U.replicate (2^(p+q)) (-1)) ij
   in map (genWrite shared) ij 
@@ -240,36 +208,44 @@ doPermGroup perm p q g input =
           let out_addr = snd $ generateAccesses perm p q g i j
               sh_addr = j * 2^q + i
           in (out_addr, shared U.! sh_addr)
-        n = length perm
+        n = P.size perm
         
-doPerm :: Perm -> Int -> Int -> [Int] -> [Int]
+doPerm :: P.Perm -> Int -> Int -> [Int] -> [Int]
 doPerm perm p q input = U.toList $ U.replicate (2^n) (-1) U.// updates
-  where n = length perm
+  where n = P.size perm
         updates = concatMap (\g -> doPermGroup perm p q g (U.fromList input)) [0..2^(n-p-q)-1]
 
-doPermNaive :: Perm -> [a] -> [a]
-doPermNaive perm = permuteBMMC (permToMatrix perm)
+doPermNaive :: P.Perm -> [a] -> [a]
+doPermNaive perm = permuteBMMC (P.toMatrix perm)
   
 isConsecutive :: [Int] -> Bool
 isConsecutive xs = sort xs == [minimum xs..maximum xs]
   
 main :: IO ()
 main = do 
-  let n = 10
-      p = 4
-  perm <- randomPerm n
-  let q = tally (\i -> perm !! i < p) [p..n-1]
-      xs = [0..2^n - 1]
-      ys1 = doPermNaive perm xs
-      ys2 = doPerm perm p q xs
-  print $ permToMatrix perm
-  putStrLn $ "n = " <> show n 
-  putStrLn $ "p = " <> show p 
-  putStrLn $ "q = " <> show q 
-  --print xs
-  --print ys1 
-  --print ys2
-  print $ ys1 == ys2
+  let n = 30
+  perm <- P.generateRandom n
+  print $ P.toMatrix perm
+  putStrLn $ generateBP perm 5
+  putStrLn $ generateBPIter perm 5 3
+
+--main :: IO ()
+--main = do 
+--  let n = 10
+--      p = 4
+--  perm <- P.generateRandom n
+--  let q = tally (\i -> P.apply perm i < p) [p..n-1]
+--      xs = [0..2^n - 1]
+--      ys1 = doPermNaive perm xs
+--      ys2 = doPerm perm p q xs
+--  print $ P.toMatrix perm
+--  putStrLn $ "n = " <> show n 
+--  putStrLn $ "p = " <> show p 
+--  putStrLn $ "q = " <> show q 
+--  --print xs
+--  --print ys1 
+--  --print ys2
+--  print $ ys1 == ys2
 
 --main :: IO ()
 --main = do
