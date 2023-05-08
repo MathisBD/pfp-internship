@@ -9,7 +9,7 @@ import System.Random ( randomIO, randomRIO )
 import qualified Bmmc as B
 import qualified Data.Vector.Unboxed as U
 import qualified Perm as P
-import KernelGen ( generateBP, generateBPIter )
+import KernelGen
 
 
 -- Seperate a list in two.
@@ -223,11 +223,15 @@ isConsecutive xs = sort xs == [minimum xs..maximum xs]
   
 main :: IO ()
 main = do 
-  let n = 30
+  let n = 10
+      p = 4
+      iters = 3
   perm <- P.generateRandom n
   print $ P.toMatrix perm
-  putStrLn $ generateBP perm 5
-  putStrLn $ generateBPIter perm 5 3
+  putStrLn $ generateBP perm p
+  putStrLn $ generateBPbanks perm p
+  --putStrLn $ generateBPIter perm p iters
+  --putStrLn $ generateBPIterG perm p iters
 
 --main :: IO ()
 --main = do 
