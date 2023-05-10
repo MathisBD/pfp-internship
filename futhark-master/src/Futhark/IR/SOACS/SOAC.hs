@@ -73,7 +73,7 @@ import Futhark.Util (chunks, maybeNth)
 import Futhark.Util.Pretty (Doc, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
-import qualified Language.Futhark.Parser.Lexer.Wrapper as arrays
+
 
 -- | A second-order array combinator (SOAC).
 data SOAC rep
@@ -124,6 +124,7 @@ data SOAC rep
     -- 
     -- <mask-array> is a single array of shape [<masks-length>]. The same masks are used for every input.
     -- <input-arrays> is a list of input arrays, all having the shape [<length>].
+    -- <lambda> is the lambda that is applied to the inputs partitioned according to the masks.
     Parm SubExp VName SubExp [VName] (Lambda rep)
   | -- FIXME: this should not be here
     JVP (Lambda rep) [SubExp] [SubExp]
