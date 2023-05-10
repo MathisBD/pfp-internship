@@ -1,0 +1,64 @@
+# Ignore non-directories in root, so you can use it as scratch space.
+#/*
+#!/*/
+
+# The previous lines explicitly unignores .git
+/.git
+
+# Ignore Emacs autosave files.
+
+\#*\#
+.#*
+*~
+
+# The previous lines explicitly unignores .git
+/.git
+
+# Ignore Emacs autosave files.
+
+\#*\#
+.#*
+*~
+
+# Ignore IntelliJ configuration files
+.idea/
+
+# Ignore cabal build directory.
+dist
+dist-newstyle
+
+# Ignore IDE info
+.hie
+.vscode
+
+# Ignore side-effects of compilation.
+*.aux
+*.log
+*.bbl
+*.blg
+*.out
+*.prof
+*.o
+*.hi
+*.snm
+*.toc
+*.vrb
+*.nav
+
+# Ignore core dumps.
+core
+core.*
+
+# Ignore flymake-files created by Emacs.
+*flymake*
+
+# Ignore temporary backup directories.
+*-backup
+
+# Ignore directories often created by testing
+data/
+lib/
+testparser/
+
+# Ignore macOS system files.
+.DS_Store
