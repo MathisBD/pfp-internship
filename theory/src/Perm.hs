@@ -1,5 +1,6 @@
 module Perm (
-  Perm, size, identity, Perm.reverse, make,
+  Perm, size, fromList, toList, make,
+  identity, Perm.reverse,
   inverse, apply, toMatrix, permute,
   generateAll, generateRandom
 ) where 
@@ -23,7 +24,13 @@ apply perm i = perm U.! i
 
 -- Make a permutation given a mapping.
 make :: Int -> (Int -> Int) -> Perm
-make n f = U.generate n f
+make = U.generate
+
+fromList :: [Int] -> Perm
+fromList = U.fromList
+
+toList :: Perm -> [Int]
+toList = U.toList
 
 -- The identity permutation on n elements.
 identity :: Int -> Perm 
@@ -76,3 +83,4 @@ permute :: Perm -> [a] -> [a]
 permute perm xs = [ xs !! apply inv i | i <- [0..n-1] ]
   where n = size perm
         inv = inverse perm
+
