@@ -129,10 +129,10 @@ generateBP perm p = unlines $
           where -- Stitch the output bits together 
                 go addr_idx i_idx j_idx g_idx
                   | addr_idx >= n = []
-                  | addr_idx < q =
-                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | P.apply perm addr_idx < p = 
                       (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
+                  | addr_idx < p =
+                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | otherwise =
                       (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
 
@@ -207,10 +207,10 @@ generateBPbanks perm p = unlines $
           where -- Stitch the output bits together 
                 go addr_idx i_idx j_idx g_idx
                   | addr_idx >= n = []
-                  | addr_idx < q =
-                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | P.apply perm addr_idx < p = 
                       (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
+                  | addr_idx < p =
+                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | otherwise =
                       (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
 
@@ -303,12 +303,12 @@ generateBPIter perm p iters0 = unlines $
           where -- Stitch the output bits together 
                 go addr_idx i_idx j_idx g_idx
                   | addr_idx >= n = []
-                  | addr_idx < q && i_idx < iters =
-                      (v_out_addr, P.apply perm addr_idx, v_iter, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
-                  | addr_idx < q && i_idx >= iters =
-                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx - iters, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | P.apply perm addr_idx < p = 
                       (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
+                  | addr_idx < p && i_idx < iters =
+                      (v_out_addr, P.apply perm addr_idx, v_iter, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
+                  | addr_idx < p && i_idx >= iters =
+                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx - iters, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | otherwise =
                       (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
         (inner_output_assigns, outer_output_assigns) = 
@@ -405,10 +405,10 @@ generateBPIterG perm p iters0 = unlines $
           where -- Stitch the output bits together 
                 go addr_idx i_idx j_idx g_idx
                   | addr_idx >= n = []
-                  | addr_idx < q =
-                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | P.apply perm addr_idx < p = 
                       (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
+                  | addr_idx < p =
+                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
                   | g_idx < iters =
                       (v_out_addr, P.apply perm addr_idx, v_iter, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
                   | otherwise =
