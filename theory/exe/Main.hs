@@ -225,14 +225,12 @@ main :: IO ()
 main = do 
   let n = 20
       p = 5
+      iters = 3
       --perm = P.reverse n
   perm <- P.generateRandom n
   print $ P.toMatrix perm
-  putStrLn $ generateBPbanks "0" perm p
-  --putStrLn $ generateBPbanks perm p
-  --putStrLn $ generateBPIter perm p iters
-  --putStrLn $ generateBPIterG perm p iters
-
+  putStrLn $ generate "0" perm
+  
 --main :: IO ()
 --main = do 
 --  let n = 10
