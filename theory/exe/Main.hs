@@ -223,14 +223,19 @@ isConsecutive xs = sort xs == [minimum xs..maximum xs]
   
 main :: IO ()
 main = do 
-  let n = 20
+  let n = 30
       p = 5
       iters = 3
       --perm = P.reverse n
   perm <- P.generateRandom n
   print $ P.toMatrix perm
-  putStrLn $ generate "0" perm
-  
+  putStrLn $ generate "0" perm <> "\n"
+  putStrLn $ generateC "0" perm p <> "\n"
+  putStrLn $ generateCB "0" perm p <> "\n"
+  putStrLn $ generateCI "0" perm p iters <> "\n"
+  putStrLn $ generateCI2 "0" perm p iters <> "\n"
+  putStrLn $ generateCBI "0" perm p iters <> "\n"
+
 --main :: IO ()
 --main = do 
 --  let n = 10
