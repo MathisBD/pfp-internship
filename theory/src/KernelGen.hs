@@ -61,16 +61,77 @@ generateAssign (v_out, out_idx, v_in, in_idx, offsets) =
 bitIdxsToInteger :: [Int] -> Integer
 bitIdxsToInteger is = foldl (.|.) 0 $ map (shiftL 1) is
 
+genInAddrBasic n p q perm v_in_addr v_i v_j v_g = mergeAssigns $ go 0 0 0 0
+  -- Stitch the input bits together 
+  where go addr_idx i_idx j_idx g_idx
+          | addr_idx >= n = []
+          | addr_idx < p =
+              (v_in_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx+1) i_idx (j_idx+1) g_idx
+          | P.apply perm addr_idx < p = 
+              (v_in_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx+1) (i_idx + 1) j_idx g_idx
+          | otherwise =
+              (v_in_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx+1)
+
+genOutAddrBasic n p q perm v_out_addr v_i v_j v_g = mergeAssigns $ go 0 0 0 0 
+  where -- Stitch the output bits together 
+        go addr_idx i_idx j_idx g_idx
+          | addr_idx >= n = []
+          | P.apply perm addr_idx < p = 
+              (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
+          | addr_idx < p =
+              (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
+          | otherwise =
+              (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
+
+genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j = mergeAssigns $ go 0 0 0
+  where go addr_idx i_idx j_idx 
+          | addr_idx >= p + q = []
+          | addr_idx < p = 
+              (v_iblock_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx+1)
+          | otherwise = 
+              (v_iblock_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx+1) j_idx
+
+genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j = mergeAssigns $ go 0 0 0
+  where go addr_idx i_idx j_idx 
+          | addr_idx >= p + q = []
+          | P.apply perm addr_idx < p || addr_idx >= p = 
+              (v_oblock_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx+1)
+          | otherwise = 
+              (v_oblock_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx+1) j_idx
+
+genShift n p q perm v_shift v_block_addr = mergeAssigns $ go 0 0
+  where go addr_idx row_idx
+          | row_idx >= q = []
+          | P.apply perm addr_idx < p = 
+              go (addr_idx+1) row_idx
+          | otherwise = 
+              (v_shift, addr_idx, v_block_addr, row_idx + p, [0]) : go (addr_idx+1) (row_idx+1)
+
+-- Variable names used in every kernel
+v_in, v_out, v_block, v_g, v_i, v_j, v_in_addr, v_out_addr :: String
+v_iblock_addr, v_oblock_addr :: String
+v_in = "in_vect"
+v_out = "out_vect"
+v_block = "block"
+v_g = "g"
+v_i = "i"
+v_j = "j"
+v_in_addr = "in_addr"
+v_out_addr = "out_addr"
+v_iblock_addr = "iblock_addr"
+v_oblock_addr = "oblock_addr"
+              
+
 -- Generate the CUDA code for a kernel that performs the given bit-permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
-generateBP :: P.Perm -> Int -> String
-generateBP perm p = unlines $
+generateBP :: String -> P.Perm -> Int -> String
+generateBP name perm p = unlines $
   [ comment $ "size of input and output arrays = 2^n"
   , comment $ "thread group count = (2^(n-p-q), 1, 1)  group size = (2^p, 2^q, 1)"
   , comment $ "n = " <> show n <> "  p = " <> show p <> "  q = " <> show q
   , comment $ "permutation = " <> show perm
-  , "__global__ void BP_kernel(const int* " <> v_in <> ", int* " <> v_out <> ")"
+  , "__global__ void " <> kernel_name <> "(const int* " <> v_in <> ", int* " <> v_out <> ")"
   , "{"
   ] ++
   map indent body_lines
@@ -78,14 +139,7 @@ generateBP perm p = unlines $
   [ "}" ]
   where n = P.size perm 
         q = tally [p..n-1] $ \i -> P.apply perm i < p
-        v_in = "in_vect"
-        v_out = "out_vect"
-        v_block = "block"
-        v_g = "g"
-        v_i = "i"
-        v_j = "j"
-        v_in_addr = "in_addr"
-        v_out_addr = "out_addr"
+        kernel_name = "gen_kernel_n" <> show n <> "_" <> name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
           , "size_t " <> v_g <> " = blockIdx.x;"
@@ -101,52 +155,35 @@ generateBP perm p = unlines $
           ] ++
           output_lines
         input_lines =  
-          [ comment "Read the input block" ] ++ 
-          input_addr_lines ++
-          [ v_block <> "[" <> v_i <> " * " <> show (2^p) <> " + " <> v_j <> "] = " <> 
-              v_in <> "[" <> v_in_addr <> "];"
+          [ comment "Read the input block"
+          , "size_t " <> v_in_addr <> " = 0;"
+          , "size_t " <> v_iblock_addr <> " = 0;"
+          ] ++ 
+          map generateAssign (genInAddrBasic n p q perm v_in_addr v_i v_j v_g) ++
+          map generateAssign (genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
+          [ v_block <> "[" <> v_iblock_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];"
           ]
         output_lines = 
           [ comment "Write the output block"
+          , "size_t " <> v_out_addr <> " = 0;"
+          , "size_t " <> v_oblock_addr <> " = 0;"
           ] ++
-          output_addr_code ++
-          [ v_out <> "[" <> v_out_addr <> "] = " <> 
-              v_block <> "[" <> v_j <> " * " <> show (2^q) <> " + " <> v_i <> "];"
+          map generateAssign (genOutAddrBasic n p q perm v_out_addr v_i v_j v_g) ++
+          map generateAssign (genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j) ++
+          [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> v_oblock_addr <> "];"
           ]
-        input_addr_lines = 
-          ("size_t " <> v_in_addr <> " = " <> v_j <> ";") : 
-          map generateAssign (mergeAssigns $ go p 0 0)
-          where -- Stitch the input bits together 
-                go addr_idx i_idx g_idx
-                  | addr_idx >= n = []
-                  | P.apply perm addr_idx < p = 
-                      (v_in_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) g_idx
-                  | otherwise =
-                      (v_in_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx (g_idx + 1)
-        output_addr_code = 
-          ("size_t " <> v_out_addr <> " = 0;") : 
-          map generateAssign (mergeAssigns $ go 0 0 0 0)
-          where -- Stitch the output bits together 
-                go addr_idx i_idx j_idx g_idx
-                  | addr_idx >= n = []
-                  | P.apply perm addr_idx < p = 
-                      (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
-                  | addr_idx < p =
-                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
-                  | otherwise =
-                      (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
 
 -- Generate the CUDA code for a kernel that performs the given bit-permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
--- This version avoids shared memory bank conflicts.
-generateBPbanks :: P.Perm -> Int -> String
-generateBPbanks perm p = unlines $
+-- This version should avoid bank conflicts
+generateBPbanks :: String -> P.Perm -> Int -> String
+generateBPbanks name perm p = unlines $
   [ comment $ "size of input and output arrays = 2^n"
   , comment $ "thread group count = (2^(n-p-q), 1, 1)  group size = (2^p, 2^q, 1)"
   , comment $ "n = " <> show n <> "  p = " <> show p <> "  q = " <> show q
   , comment $ "permutation = " <> show perm
-  , "__global__ void BP_kernel(const int* " <> v_in <> ", int* " <> v_out <> ")"
+  , "__global__ void " <> kernel_name <> "(const int* " <> v_in <> ", int* " <> v_out <> ")"
   , "{"
   ] ++
   map indent body_lines
@@ -154,16 +191,11 @@ generateBPbanks perm p = unlines $
   [ "}" ]
   where n = P.size perm 
         q = tally [p..n-1] $ \i -> P.apply perm i < p
-        v_in = "in_vect"
-        v_out = "out_vect"
-        v_block = "block"
-        v_g = "g"
-        v_i = "i"
-        v_j = "j"
-        v_in_addr = "in_addr"
-        v_out_addr = "out_addr"
+        v_ishift = "ishift"
+        v_oshift = "oshift"
+        kernel_name = "gen_kernel_banks_n" <> show n <> "_" <> name
         body_lines =
-          [ "__shared__ int " <> v_block <> "[" <> show ((2^p + 1) * 2^q) <> "];"
+          [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
           , "size_t " <> v_g <> " = blockIdx.x;"
           , "size_t " <> v_i <> " = threadIdx.y;"
           , "size_t " <> v_j <> " = threadIdx.x;"
@@ -177,42 +209,33 @@ generateBPbanks perm p = unlines $
           ] ++
           output_lines
         input_lines =  
-          [ comment "Read the input block" ] ++ 
-          input_addr_lines ++
-          [ v_block <> "[" <> block_in_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];" ]
-        block_in_addr = 
-          v_i <> " * " <> show (2^p + 1) <> 
-          " + " <> v_j
+          [ comment "Read the input block"
+          , "size_t " <> v_in_addr <> " = 0;"
+          , "size_t " <> v_iblock_addr <> " = 0;"
+          , "size_t " <> v_ishift <> " = 0;"
+          ] ++ 
+          map generateAssign (genInAddrBasic n p q perm v_in_addr v_i v_j v_g) ++
+          map generateAssign (genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
+          map generateAssign (genShift n p q perm v_ishift v_iblock_addr) ++
+          [ v_block <> "[" <> 
+              "(" <> v_iblock_addr <> " & " <> show ((2^q-1) * 2^p) <> ") + " <> 
+              "((" <> v_ishift <> " + " <> v_iblock_addr <> ") & " <> show (2^p-1) <> ")" <>
+            "] = " <> v_in <> "[" <> v_in_addr <> "];"
+          ]
         output_lines = 
-          [ comment "Write the output block" ] ++
-          output_addr_code ++
-          [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> block_out_addr <> "];" ]
-        block_out_addr = 
-          "(" <> v_j <> " >> " <> show (p-q) <> ")" <> " * " <> show (2^p + 1) <> 
-          " + (" <> v_j <> " & " <> show (2^(p-q) - 1) <> ") * " <> show (2^q) <> 
-          " + " <> v_i
-        input_addr_lines = 
-          ("size_t " <> v_in_addr <> " = " <> v_j <> ";") : 
-          map generateAssign (mergeAssigns $ go p 0 0)
-          where -- Stitch the input bits together 
-                go addr_idx i_idx g_idx
-                  | addr_idx >= n = []
-                  | P.apply perm addr_idx < p = 
-                      (v_in_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) g_idx
-                  | otherwise =
-                      (v_in_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx (g_idx + 1)
-        output_addr_code = 
-          ("size_t " <> v_out_addr <> " = 0;") : 
-          map generateAssign (mergeAssigns $ go 0 0 0 0)
-          where -- Stitch the output bits together 
-                go addr_idx i_idx j_idx g_idx
-                  | addr_idx >= n = []
-                  | P.apply perm addr_idx < p = 
-                      (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
-                  | addr_idx < p =
-                      (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
-                  | otherwise =
-                      (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
+          [ comment "Write the output block"
+          , "size_t " <> v_out_addr <> " = 0;"
+          , "size_t " <> v_oblock_addr <> " = 0;"
+          , "size_t " <> v_oshift <> " = 0;"
+          ] ++
+          map generateAssign (genOutAddrBasic n p q perm v_out_addr v_i v_j v_g) ++
+          map generateAssign (genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j) ++
+          map generateAssign (genShift n p q perm v_oshift v_oblock_addr) ++
+          [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> 
+              "(" <> v_oblock_addr <> " & " <> show ((2^q-1) * 2^p) <> ") + " <> 
+              "((" <> v_oshift <> " + " <> v_oblock_addr <> ") & " <> show (2^p-1) <> ")"
+            <> "];"
+          ]
 
 -- Generate the CUDA code for a kernel that performs the given bit-permutation.
 -- The parameters are :
