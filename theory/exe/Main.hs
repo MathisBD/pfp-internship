@@ -228,7 +228,7 @@ main = do
       iters = 3
       --perm = P.reverse n
   perm <- P.generateRandom n
-  print $ P.toMatrix perm
+  print $ B.fromPerm perm
   putStrLn $ generate "0" perm <> "\n"
   putStrLn $ generateC "0" perm p <> "\n"
   putStrLn $ generateCB "0" perm p <> "\n"

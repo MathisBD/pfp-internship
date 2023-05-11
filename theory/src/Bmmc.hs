@@ -1,12 +1,14 @@
 module Bmmc (
   BMatrix, rows, cols, isSquare, 
   make, makeCol, makeRow, get,
-  mult, transpose, empty, identity,
+  add, mult, transpose, empty, identity, zeros, ones,
   colToInt, rowToInt, colFromInt, rowFromInt,
   vstack, hstack, vsplit, hsplit,
+  fromPerm,
   reducedRowEchelon, inverse, isInvertible, unsafeInverse,
   blockDiag, rank,
-  transformInt
+  transformInt,
+  decomposeLUP, decomposeULP
 ) where
 
 import Data.Bits ( Bits(shiftR, xor, (.|.), shiftL) )
@@ -18,6 +20,7 @@ import Control.Monad.ST ( ST )
 import Control.Monad.Extra ( findM )
 import Control.Monad ( when )
 import Data.Foldable ( forM_ )
+import qualified Perm as P
 
 
 -- Rectangular boolean matrices. The first two arguments are the number of rows and columns.
@@ -54,9 +57,14 @@ makeRow :: Int -> (Int -> Bool) -> BMatrix
 makeRow n f = make 1 n $ \i j -> f j
 
 mult :: BMatrix -> BMatrix -> BMatrix
-a `mult` b | cols a /= rows b = error "mult: inner dimensions do not match"
+a `mult` b | cols a /= rows b = error "Bmmc.mult: inner dimensions do not match"
 a `mult` b = make (rows a) (cols b) $ \i j -> 
   foldr xor False [ get a i k && get b k j | k <- [0..cols a - 1] ]
+
+add :: BMatrix -> BMatrix -> BMatrix
+a `add` b | rows a /= rows b || cols a /= cols b = error "Bmmc.add: dimensions do not match"
+a `add` b = make (rows a) (cols a) $ \i j ->
+  get a i j `xor` get b i j
 
 transpose :: BMatrix -> BMatrix
 transpose a = make (cols a) (rows a) $ \i j -> get a j i
@@ -68,6 +76,14 @@ empty = BMatrix 0 0 U.empty
 -- The square identity matrix
 identity :: Int -> BMatrix
 identity n = make n n $ \i j -> i == j
+
+-- A matrix filled with 0 entries
+zeros :: Int -> Int -> BMatrix
+zeros r c = make r c $ \_ _ -> False
+
+-- A matrix filled with 1 entries
+ones :: Int -> Int -> BMatrix
+ones r c = make r c $ \_ _ -> True
 
 -- Horizontal stacking
 hstack :: BMatrix -> BMatrix -> BMatrix 
@@ -132,6 +148,11 @@ reducedRowEchelonAux rows cols a = go 0 0
         get i j = MU.read a (i * cols + j)
         set i j = MU.write a (i * cols + j)
 
+fromPerm :: P.Perm -> BMatrix 
+fromPerm perm = make n n $ \i j -> i == P.apply perm j
+  where n = P.size perm
+
+
 -- Compute the inverse of a matrix.
 inverse :: BMatrix -> Maybe BMatrix 
 inverse a | not (isSquare a) = Nothing
@@ -184,3 +205,41 @@ rowFromInt n x = transpose $ colFromInt n x
 transformInt :: BMatrix -> Integer -> Integer
 a `transformInt` x = colToInt $ a `mult` colFromInt (cols a) x
 
+-- Decompose a matrix A as A = L*U*P
+-- where P is a permutation matrix
+--       L is a lower triangular matrix
+--       U is an upper triangular matrix
+decomposeLUP :: BMatrix -> (BMatrix, BMatrix, P.Perm)
+decomposeLUP a 
+  | not (isSquare a) = error "Upper/Lower definition is only defined for square matrices"
+  | n <= 1 = (identity n, a, P.identity n)
+  | otherwise = (l, u, p)
+  where l = block (ones 1 1) (zeros 1 (n-1)) v l'
+        u = block (ones 1 1) (w `mult` fromPerm (P.inverse p')) (zeros (n-1) 1) u'
+        p = shift p' `P.compose` pswap
+          where shift p = P.fromList $ 0 : map (+1) (P.toList p)
+        (l', u', p') = decomposeLUP (a' `add` (v `mult` w))
+        (x, w, v, a') = unblock (a `mult` fromPerm pswap)
+        pswap = P.swap n 0 j
+          where Just j = find (get a 0) [0..n-1]
+        block x1 x2 x3 x4 = (x1 `hstack` x2) `vstack` (x3 `hstack` x4)
+        unblock x = (x1, x2, x3, x4)
+          where (x12, x34) = vsplit 1 x
+                (x1, x2) = hsplit 1 x12
+                (x3, x4) = hsplit 1 x34
+        n = rows a
+        
+-- Decompose a matrix A as A = U*L*P
+-- where P is a permutation matrix
+--       L is a lower triangular matrix
+--       U is an upper triangular matrix
+decomposeULP :: BMatrix -> (BMatrix, BMatrix, P.Perm)
+decomposeULP a 
+  | not (isSquare a) = error "Upper/Lower definition is only defined for square matrices"
+  | otherwise = (u, l, p)
+  where u = r `mult` l' `mult` r
+        l = r `mult` u' `mult` r
+        p = P.reverse n `P.compose` p' `P.compose` P.reverse n
+        (l', u', p') = decomposeLUP (r `mult` a `mult` r)
+        r = fromPerm $ P.reverse n
+        n = rows a

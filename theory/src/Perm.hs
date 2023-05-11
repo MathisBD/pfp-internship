@@ -1,13 +1,12 @@
 module Perm (
   Perm, size, fromList, toList, make,
-  identity, Perm.reverse,
-  inverse, apply, toMatrix, permute,
+  identity, Perm.reverse, swap,
+  compose, inverse, apply, permute,
   generateAll, generateRandom
 ) where 
 
 import System.Random ( randomIO, randomRIO )
 import qualified Data.Vector.Unboxed as U
-import qualified Bmmc as B
 
 -- The permutation is defined as the mapping between the indices
 -- and the corresponding elements.
@@ -40,9 +39,11 @@ identity n = make n id
 reverse :: Int -> Perm 
 reverse n = make n $ \i -> n - 1 - i
 
-toMatrix :: Perm -> B.BMatrix 
-toMatrix perm = B.make n n $ \i j -> i == apply perm j
-  where n = size perm
+-- The permutation that swaps two indices.
+swap :: Int -> Int -> Int -> Perm
+swap n k1 k2 = make n $ \i -> if i == k1 then k2 
+                              else if i == k2 then k1
+                              else i
 
 -- Generate all permutations on n elements.
 generateAll :: Int -> [Perm]
@@ -68,6 +69,14 @@ generateRandom n = do
   pure $ make n $ \i -> 
     if i == 0 then first else 
     let x = apply rest (i-1) in if x < first then x else x + 1
+
+-- Compose two permutations :
+--   compose p2 p1 == p2 . p1 
+compose :: Perm -> Perm -> Perm
+compose p2 p1
+  | size p1 /= size p2 = error "Perm.compose : can only compose permutations of the same size"
+  | otherwise = make n $ \i -> apply p2 $ apply p1 i
+  where n = size p1
 
 -- Compute the inverse of a permutation.
 inverse :: Perm -> Perm 
