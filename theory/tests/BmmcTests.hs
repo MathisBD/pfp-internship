@@ -49,6 +49,7 @@ instance Arbitrary P.Perm where
   arbitrary = sized $ \n -> 
     P.fromList <$> shuffle [0..n-1] 
 
+
 -- An arbitrary matrix
 randMatrix :: Int -> Int -> Gen B.BMatrix
 randMatrix rows cols = do 

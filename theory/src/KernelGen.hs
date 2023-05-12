@@ -1,6 +1,6 @@
 module KernelGen (
   KernelGen.generate, generateC, generateCB, generateCI, generateCBI,
-  generateBmmcC
+  generateBmmcC, generateBmmcCB
 ) where
 
 import qualified Bmmc as B
@@ -557,4 +557,75 @@ generateBmmcC name mat p = unlines $
             show (B.rowToInt $ B.getRow mat i) <> " & " <> v_out_tmp <> ") & 1) << " <> show i <> ";") 
             [0..n-1] ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> v_oblock_addr <> "];"
+          ]
+
+-- The parameters are :
+-- --^ p : (log) size we need for coalescing, typically 4 or 5.
+generateBmmcCB :: String -> B.BMatrix -> Int -> String
+generateBmmcCB name mat p = unlines $
+  [ comment $ "size of input and output arrays = 2^n"
+  , comment $ "thread group count = (2^(n-p-q), 1, 1)  group size = (2^p, 2^q, 1)"
+  , comment $ "n = " <> show n <> "  p = " <> show p <> "  q = " <> show q
+  , comment $ "cols = " <> show cols
+  --, comment $ "permutation = " <> show perm
+  , "__global__ void " <> kernel_name <> "(const int* " <> v_in <> ", int* " <> v_out <> ")"
+  , "{"
+  ] ++
+  map indent body_lines
+  ++
+  [ "}" ]
+  where n = B.rows mat 
+        -- The columns that are 'sparse'
+        cols = assert (length cols0 >= p) $ take p cols0
+          where cols0 = filter (\j -> all (\i -> not (B.get mat i j)) [p..n-1]) [0..n-1]
+        q = tally cols $ \j -> j >= p
+        kernel_name = "generateBmmcCB_n" <> show n <> "_" <> name
+        v_ishift = "ishift"
+        v_oshift = "oshift"
+        v_out_tmp = "out_tmp"
+        body_lines =
+          [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
+          , "size_t " <> v_g <> " = blockIdx.x;"
+          , "size_t " <> v_i <> " = threadIdx.y;"
+          , "size_t " <> v_j <> " = threadIdx.x;"
+          , ""
+          ] ++
+          input_lines ++
+          [ ""
+          , comment "Synchronize"
+          , "__syncthreads();"
+          , ""
+          ] ++
+          output_lines
+        input_lines =  
+          [ comment "Read the input block"
+          , "size_t " <> v_in_addr <> " = 0;"
+          , "size_t " <> v_iblock_addr <> " = 0;"
+          , "size_t " <> v_ishift <> " = 0;"
+          ] ++ 
+          map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
+          map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genShift n p q cols v_ishift v_iblock_addr) ++
+          [ v_block <> "[" <> 
+              "(" <> v_iblock_addr <> " & " <> show ((2^q-1) * 2^p) <> ") + " <> 
+              "((" <> v_ishift <> " + " <> v_iblock_addr <> ") & " <> show (2^p-1) <> ")" <>
+            "] = " <> v_in <> "[" <> v_in_addr <> "];"
+          ]
+        output_lines = 
+          [ comment "Write the output block"
+          , "size_t " <> v_out_tmp <> " = 0;"
+          , "size_t " <> v_out_addr <> " = 0;"
+          , "size_t " <> v_oblock_addr <> " = 0;"
+          , "size_t " <> v_oshift <> " = 0;"
+          ] ++
+          map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genShift n p q cols v_oshift v_oblock_addr) ++
+          map generateAssign (mergeAssigns $ genOutAddrBasic n p q cols v_out_tmp v_i v_j v_g) ++
+          map (\i -> v_out_addr <> " |= (__popcll(" <> 
+            show (B.rowToInt $ B.getRow mat i) <> " & " <> v_out_tmp <> ") & 1) << " <> show i <> ";") 
+            [0..n-1] ++
+          [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> 
+              "(" <> v_oblock_addr <> " & " <> show ((2^q-1) * 2^p) <> ") + " <> 
+              "((" <> v_oshift <> " + " <> v_oblock_addr <> ") & " <> show (2^p-1) <> ")"
+            <> "];"
           ]
