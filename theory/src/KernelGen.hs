@@ -1,5 +1,6 @@
 module KernelGen (
-  KernelGen.generate, generateC, generateCB, generateCI, generateCI2, generateCBI
+  KernelGen.generate, generateC, generateCB, generateCI, generateCBI,
+  generateBmmcC
 ) where
 
 import qualified Bmmc as B
@@ -11,6 +12,7 @@ import Data.List.Unique ( sortUniq )
 import Data.Function ( (&) )
 import Data.Bits ( (.|.), shiftR, shiftL )
 import Data.Vector (generate)
+import Control.Exception ( assert )
 
 
 tally :: [a] -> (a -> Bool) -> Int
@@ -61,13 +63,13 @@ generateAssign (v_out, out_idx, v_in, in_idx, offsets) =
 bitIdxsToInteger :: [Int] -> Integer
 bitIdxsToInteger is = foldl (.|.) 0 $ map (shiftL 1) is
 
-genOutAddrNaive n perm v_out_addr v_in_addr = mergeAssigns $ go 0
+genOutAddrNaive n perm v_out_addr v_in_addr = go 0
   where go idx
           | idx >= n = []
           | otherwise =
               (v_out_addr, P.apply perm idx, v_in_addr, idx, [0]) : go (idx+1)
 
-genInAddrBasic n p q perm v_in_addr v_i v_j v_g = mergeAssigns $ go 0 0 0 0
+genInAddrBasic n p q cols v_in_addr v_i v_j v_g = go 0 0 0 0
   -- Stitch the input bits together 
   where go addr_idx i_idx j_idx g_idx
           | addr_idx >= n = []
@@ -75,13 +77,13 @@ genInAddrBasic n p q perm v_in_addr v_i v_j v_g = mergeAssigns $ go 0 0 0 0
           | addr_idx < p =
               (v_in_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx+1) i_idx (j_idx+1) g_idx
           -- Take bit from i
-          | P.apply perm addr_idx < p = 
+          | addr_idx `elem` cols = 
               (v_in_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx+1) (i_idx + 1) j_idx g_idx
           -- Take bit from g
           | otherwise =
               (v_in_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx+1)
 
-genInAddrIter n p q iters perm v_in_addr v_i v_j v_g v_iter = mergeAssigns $ go 0 0 0 0 0
+genInAddrIter n p q iters cols v_in_addr v_i v_j v_g v_iter = go 0 0 0 0 0
   -- Stitch the input bits together 
   -- Compared to the basic version, here the bits of iter take 
   -- the place of the lower bits of g.
@@ -91,7 +93,7 @@ genInAddrIter n p q iters perm v_in_addr v_i v_j v_g v_iter = mergeAssigns $ go 
           | addr_idx < p =
               (v_in_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx+1) i_idx (j_idx+1) g_idx iter_idx
           -- Take bit from i
-          | P.apply perm addr_idx < p = 
+          | addr_idx `elem` cols = 
               (v_in_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx+1) (i_idx + 1) j_idx g_idx iter_idx
           -- Take bit from iter
           | iter_idx < iters =
@@ -100,75 +102,39 @@ genInAddrIter n p q iters perm v_in_addr v_i v_j v_g v_iter = mergeAssigns $ go 
           | otherwise =
               (v_in_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx+1) iter_idx
 
-genInAddrIter2 n p q iters perm v_in_addr v_i v_j v_g v_iter = mergeAssigns $ go 0 0 0 0 0
-  -- Stitch the input bits together 
-  -- Compared to the basic version, here the bits of iter take 
-  -- the place of the lower bits of i.
-  where go addr_idx i_idx j_idx g_idx iter_idx
-          | addr_idx >= n = []
-          -- Take bit from j
-          | addr_idx < p =
-              (v_in_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx+1) i_idx (j_idx+1) g_idx iter_idx
-          -- Take bit from iter
-          | P.apply perm addr_idx < p && iter_idx < iters = 
-              (v_in_addr, addr_idx, v_iter, iter_idx, [0]) : go (addr_idx+1) i_idx j_idx g_idx (iter_idx+1)
-          -- Take bit from i
-          | P.apply perm addr_idx < p = 
-              (v_in_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx+1) (i_idx + 1) j_idx g_idx iter_idx
-          -- Take bit from g
-          | otherwise =
-              (v_in_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx+1) iter_idx
-
-genOutAddrBasic n p q perm v_out_addr v_i v_j v_g = mergeAssigns $ go 0 0 0 0 
+genOutAddrBasic n p q cols v_out_addr v_i v_j v_g = go 0 0 0 0 
   where -- Stitch the output bits together 
         go addr_idx i_idx j_idx g_idx
           | addr_idx >= n = []
           -- take bit from j
-          | P.apply perm addr_idx < p = 
-              (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
+          | addr_idx `elem` cols = 
+              (v_out_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx
           -- Take bit from i
           | addr_idx < p =
-              (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
+              (v_out_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx
           -- Take bit from g
           | otherwise =
-              (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
+              (v_out_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1)
 
-genOutAddrIter n p q iters perm v_out_addr v_i v_j v_g v_iter = mergeAssigns $ go 0 0 0 0 0
+genOutAddrIter n p q iters cols v_out_addr v_i v_j v_g v_iter = go 0 0 0 0 0
   where -- Stitch the output bits together 
         go addr_idx i_idx j_idx g_idx iter_idx
           | addr_idx >= n = []
           -- take bit from j
-          | P.apply perm addr_idx < p = 
-              (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx iter_idx
+          | addr_idx `elem` cols = 
+              (v_out_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx iter_idx
           -- Take bit from i
           | addr_idx < p =
-              (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx iter_idx
+              (v_out_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx iter_idx
           -- Take bit from iter
           | iter_idx < iters =
-              (v_out_addr, P.apply perm addr_idx, v_iter, iter_idx, [0]) : go (addr_idx + 1) i_idx j_idx g_idx (iter_idx+1)
+              (v_out_addr, addr_idx, v_iter, iter_idx, [0]) : go (addr_idx + 1) i_idx j_idx g_idx (iter_idx+1)
           -- Take bit from g
           | otherwise =
-              (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1) iter_idx
-
-genOutAddrIter2 n p q iters perm v_out_addr v_i v_j v_g v_iter = mergeAssigns $ go 0 0 0 0 0
-  where -- Stitch the output bits together 
-        go addr_idx i_idx j_idx g_idx iter_idx
-          | addr_idx >= n = []
-          -- take bit from j
-          | P.apply perm addr_idx < p = 
-              (v_out_addr, P.apply perm addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx + 1) g_idx iter_idx
-          -- Take bit from iter
-          | addr_idx < p && iter_idx < iters =
-              (v_out_addr, P.apply perm addr_idx, v_iter, iter_idx, [0]) : go (addr_idx + 1) i_idx j_idx g_idx (iter_idx+1)
-          -- Take bit from i
-          | addr_idx < p =
-              (v_out_addr, P.apply perm addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx + 1) j_idx g_idx iter_idx
-          -- Take bit from g
-          | otherwise =
-              (v_out_addr, P.apply perm addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1) iter_idx
+              (v_out_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1) iter_idx
 
 
-genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j = mergeAssigns $ go 0 0 0
+genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j = go 0 0 0
   where go addr_idx i_idx j_idx 
           | addr_idx >= p + q = []
           -- Take bit from j
@@ -178,48 +144,20 @@ genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j = mergeAssigns $ go 0 0 0
           | otherwise = 
               (v_iblock_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx+1) j_idx
 
-genIBlockAddrIter2 n p q iters perm v_iblock_addr v_i v_j v_iter = mergeAssigns $ go 0 0 0 0
-  where go addr_idx i_idx j_idx iter_idx
-          | addr_idx >= p + q = []
-          -- Take bit from j
-          | addr_idx < p = 
-              (v_iblock_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx+1) iter_idx
-          -- Take bit from iter
-          | iter_idx < iters = 
-              (v_iblock_addr, addr_idx, v_iter, iter_idx, [0]) : go (addr_idx + 1) i_idx j_idx (iter_idx+1)
-          -- Take bit from i
-          | otherwise = 
-              (v_iblock_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx+1) j_idx iter_idx
-
-
-genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j = mergeAssigns $ go 0 0 0
+genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j = go 0 0 0
   where go addr_idx i_idx j_idx 
           | addr_idx >= p + q = []
           -- Take bit from j
-          | P.apply perm addr_idx < p || addr_idx >= p = 
+          | addr_idx `elem` cols || addr_idx >= p = 
               (v_oblock_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx+1)
           -- Take bit from i
           | otherwise = 
               (v_oblock_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx+1) j_idx
 
-genOBlockAddrIter2 n p q iters perm v_oblock_addr v_i v_j v_iter = mergeAssigns $ go 0 0 0 0
-  where go addr_idx i_idx j_idx iter_idx
-          | addr_idx >= p + q = []
-          -- Take bit from j
-          | P.apply perm addr_idx < p || addr_idx >= p = 
-              (v_oblock_addr, addr_idx, v_j, j_idx, [0]) : go (addr_idx + 1) i_idx (j_idx+1) iter_idx
-          -- Take bit from iter
-          | iter_idx < iters = 
-              (v_oblock_addr, addr_idx, v_iter, iter_idx, [0]) : go (addr_idx + 1) i_idx j_idx (iter_idx+1)
-          -- Take bit from i
-          | otherwise = 
-              (v_oblock_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx+1) j_idx iter_idx
-
-
-genShift n p q perm v_shift v_block_addr = mergeAssigns $ go 0 0
+genShift n p q cols v_shift v_block_addr = go 0 0
   where go addr_idx row_idx
           | row_idx >= q = []
-          | P.apply perm addr_idx < p = 
+          | addr_idx `elem` cols = 
               go (addr_idx+1) row_idx
           | otherwise = 
               (v_shift, addr_idx, v_block_addr, row_idx + p, [0]) : go (addr_idx+1) (row_idx+1)
@@ -260,7 +198,7 @@ generate name perm = unlines $
           , comment "Compute the output address"
           , "size_t " <> v_out_addr <> " = 0;"
           ] ++
-          map generateAssign (genOutAddrNaive n perm v_out_addr v_in_addr) ++
+          map generateAssign (mergeAssigns $ genOutAddrNaive n perm v_out_addr v_in_addr) ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];" ]
 
 -- Generate the CUDA code for a kernel that performs the given bit-permutation.
@@ -272,6 +210,7 @@ generateC name perm p = unlines $
   , comment $ "thread group count = (2^(n-p-q), 1, 1)  group size = (2^p, 2^q, 1)"
   , comment $ "n = " <> show n <> "  p = " <> show p <> "  q = " <> show q
   , comment $ "permutation = " <> show perm
+  , comment $ "cols = " <> show cols
   , "__global__ void " <> kernel_name <> "(const int* " <> v_in <> ", int* " <> v_out <> ")"
   , "{"
   ] ++
@@ -279,7 +218,8 @@ generateC name perm p = unlines $
   ++
   [ "}" ]
   where n = P.size perm 
-        q = tally [p..n-1] $ \i -> P.apply perm i < p
+        cols = filter (\j -> P.apply perm j < p) [0..n-1]
+        q = tally cols $ \j -> j >= p
         kernel_name = "generateC_n" <> show n <> "_" <> name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
@@ -300,8 +240,8 @@ generateC name perm p = unlines $
           , "size_t " <> v_in_addr <> " = 0;"
           , "size_t " <> v_iblock_addr <> " = 0;"
           ] ++ 
-          map generateAssign (genInAddrBasic n p q perm v_in_addr v_i v_j v_g) ++
-          map generateAssign (genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
+          map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
           [ v_block <> "[" <> v_iblock_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];"
           ]
         output_lines = 
@@ -309,8 +249,10 @@ generateC name perm p = unlines $
           , "size_t " <> v_out_addr <> " = 0;"
           , "size_t " <> v_oblock_addr <> " = 0;"
           ] ++
-          map generateAssign (genOutAddrBasic n p q perm v_out_addr v_i v_j v_g) ++
-          map generateAssign (genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ 
+            map (\(v_out, out_idx, v_in, in_idx, ofs) -> (v_out, P.apply perm out_idx, v_in, in_idx, ofs)) $
+            genOutAddrBasic n p q cols v_out_addr v_i v_j v_g) ++
+          map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> v_oblock_addr <> "];"
           ]
 
@@ -331,7 +273,8 @@ generateCB name perm p = unlines $
   ++
   [ "}" ]
   where n = P.size perm 
-        q = tally [p..n-1] $ \i -> P.apply perm i < p
+        cols = filter (\j -> P.apply perm j < p) [0..n-1]
+        q = tally cols $ \j -> j >= p
         v_ishift = "ishift"
         v_oshift = "oshift"
         kernel_name = "generateCB_n" <> show n <> "_" <> name
@@ -355,9 +298,9 @@ generateCB name perm p = unlines $
           , "size_t " <> v_iblock_addr <> " = 0;"
           , "size_t " <> v_ishift <> " = 0;"
           ] ++ 
-          map generateAssign (genInAddrBasic n p q perm v_in_addr v_i v_j v_g) ++
-          map generateAssign (genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
-          map generateAssign (genShift n p q perm v_ishift v_iblock_addr) ++
+          map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
+          map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genShift n p q cols v_ishift v_iblock_addr) ++
           [ v_block <> "[" <> 
               "(" <> v_iblock_addr <> " & " <> show ((2^q-1) * 2^p) <> ") + " <> 
               "((" <> v_ishift <> " + " <> v_iblock_addr <> ") & " <> show (2^p-1) <> ")" <>
@@ -369,9 +312,11 @@ generateCB name perm p = unlines $
           , "size_t " <> v_oblock_addr <> " = 0;"
           , "size_t " <> v_oshift <> " = 0;"
           ] ++
-          map generateAssign (genOutAddrBasic n p q perm v_out_addr v_i v_j v_g) ++
-          map generateAssign (genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j) ++
-          map generateAssign (genShift n p q perm v_oshift v_oblock_addr) ++
+          map generateAssign (mergeAssigns $ 
+            map (\(v_out, out_idx, v_in, in_idx, ofs) -> (v_out, P.apply perm out_idx, v_in, in_idx, ofs)) $            
+            genOutAddrBasic n p q cols v_out_addr v_i v_j v_g) ++
+          map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genShift n p q cols v_oshift v_oblock_addr) ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> 
               "(" <> v_oblock_addr <> " & " <> show ((2^q-1) * 2^p) <> ") + " <> 
               "((" <> v_oshift <> " + " <> v_oblock_addr <> ") & " <> show (2^p-1) <> ")"
@@ -395,7 +340,8 @@ generateCI name perm p iters0 = unlines $
   ++
   [ "}" ]
   where n = P.size perm 
-        q = tally [p..n-1] $ \i -> P.apply perm i < p
+        cols = filter (\j -> P.apply perm j < p) [0..n-1]
+        q = tally cols $ \j -> j >= p
         -- The iteration bits have to fit into the original bits for g
         iters = min iters0 (n-p-q)
         v_iter = "iter"
@@ -419,7 +365,7 @@ generateCI name perm p iters0 = unlines $
           , "size_t " <> v_in_addr <> " = 0;"
           , "size_t " <> v_iblock_addr <> " = 0;"
           ] ++ 
-          map generateAssign (genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
           map generateAssign outer_input_assigns ++
           [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_in_addr <> " &= ~" <> show in_addr_mask <> "ULL;"
@@ -431,7 +377,8 @@ generateCI name perm p iters0 = unlines $
           , "}"
           ]
         (inner_input_assigns, outer_input_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genInAddrIter n p q iters perm v_in_addr v_i v_j v_g v_iter)
+          partition (\(_, _, v_in, _, _) -> v_in == v_iter) 
+            (mergeAssigns $ genInAddrIter n p q iters cols v_in_addr v_i v_j v_g v_iter)
         in_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_input_assigns
                      & bitIdxsToInteger
         output_lines = 
@@ -439,7 +386,7 @@ generateCI name perm p iters0 = unlines $
           , "size_t " <> v_out_addr <> " = 0;"
           , "size_t " <> v_oblock_addr <> " = 0;"
           ] ++
-          map generateAssign (genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           map generateAssign outer_output_assigns ++
           [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_out_addr <> " &= ~" <> show out_addr_mask <> "ULL;"
@@ -451,93 +398,14 @@ generateCI name perm p iters0 = unlines $
           , "}"
           ]
         (inner_output_assigns, outer_output_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genOutAddrIter n p q iters perm v_out_addr v_i v_j v_g v_iter)
+          partition (\(_, _, v_in, _, _) -> v_in == v_iter) 
+            (mergeAssigns $ 
+             map (\(v_out, out_idx, v_in, in_idx, ofs) -> (v_out, P.apply perm out_idx, v_in, in_idx, ofs)) $            
+             genOutAddrIter n p q iters cols v_out_addr v_i v_j v_g v_iter)
         out_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_output_assigns
                      & bitIdxsToInteger
 
--- In this version the iter bits are taken from the low bits of i
-generateCI2 :: String -> P.Perm -> Int -> Int -> String
-generateCI2 name perm p iters0 = unlines $
-  [ comment $ "size of input and output arrays = 2^n"
-  , comment $ "thread group count = (2^(n-p-q), 1, 1)  group size = (2^p, 2^(q-iters), 1)"
-  , comment $ "n = " <> show n <> "  p = " <> show p <> "  q = " <> show q <> "  iters = " <> show iters
-  , comment $ "permutation = " <> show perm
-  , "__global__ void " <> kernel_name <> "(const int* " <> v_in <> ", int* " <> v_out <> ")"
-  , "{"
-  ] ++
-  map indent body_lines
-  ++
-  [ "}" ]
-  where n = P.size perm 
-        q = tally [p..n-1] $ \i -> P.apply perm i < p
-        -- The iteration bits have to fit into the original bits for i
-        iters = min iters0 q
-        v_iter = "iter"
-        kernel_name = "generateCI2_n" <> show n <> "_" <> name
-        body_lines =
-          [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
-          , "size_t " <> v_g <> " = blockIdx.x;"
-          , "size_t " <> v_i <> " = threadIdx.y;"
-          , "size_t " <> v_j <> " = threadIdx.x;"
-          , ""
-          ] ++
-          input_lines ++
-          [ ""
-          , comment "Synchronize"
-          , "__syncthreads();"
-          , ""
-          ] ++
-          output_lines
-        input_lines =  
-          [ comment "Read the input block"
-          , "size_t " <> v_in_addr <> " = 0;"
-          , "size_t " <> v_iblock_addr <> " = 0;"
-          ] ++ 
-          map generateAssign outer_iblock_assigns ++
-          map generateAssign outer_input_assigns ++
-          [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
-          , indent $ v_in_addr <> " &= ~" <> show in_addr_mask <> "ULL;"
-          , indent $ v_iblock_addr <> " &= ~" <> show iblock_mask <> "ULL;"
-          ] ++
-          map (indent . generateAssign) inner_input_assigns ++
-          map (indent . generateAssign) inner_iblock_assigns ++
-          [ indent $ v_block <> "[" <> v_iblock_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];"
-          , "}"
-          ]
-        (inner_input_assigns, outer_input_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genInAddrIter2 n p q iters perm v_in_addr v_i v_j v_g v_iter)
-        in_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_input_assigns
-                     & bitIdxsToInteger
-        (inner_iblock_assigns, outer_iblock_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genIBlockAddrIter2 n p q iters perm v_iblock_addr v_i v_j v_iter)
-        iblock_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_iblock_assigns
-                     & bitIdxsToInteger          
-        output_lines = 
-          [ comment "Write the output block"
-          , "size_t " <> v_out_addr <> " = 0;"
-          , "size_t " <> v_oblock_addr <> " = 0;"
-          ] ++
-          map generateAssign outer_oblock_assigns ++
-          map generateAssign outer_output_assigns ++
-          [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
-          , indent $ v_out_addr <> " &= ~" <> show out_addr_mask <> "ULL;"
-          , indent $ v_oblock_addr <> " &= ~" <> show oblock_mask <> "ULL;"
-          ] ++
-          map (indent . generateAssign) inner_output_assigns ++
-          map (indent . generateAssign) inner_oblock_assigns ++
-          [ indent $ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> v_oblock_addr <> "];"
-          , "}"
-          ]
-        (inner_output_assigns, outer_output_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genOutAddrIter2 n p q iters perm v_out_addr v_i v_j v_g v_iter)
-        out_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_output_assigns
-                     & bitIdxsToInteger
-        (inner_oblock_assigns, outer_oblock_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genOBlockAddrIter2 n p q iters perm v_oblock_addr v_i v_j v_iter)
-        oblock_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_oblock_assigns
-                     & bitIdxsToInteger          
-        
-        
+              
 
 -- Generate the CUDA code for a kernel that performs the given bit-permutation.
 -- The parameters are :
@@ -557,7 +425,8 @@ generateCBI name perm p iters0 = unlines $
   ++
   [ "}" ]
   where n = P.size perm 
-        q = tally [p..n-1] $ \i -> P.apply perm i < p
+        cols = filter (\j -> P.apply perm j < p) [0..n-1]
+        q = tally cols $ \j -> j >= p
         -- The iteration bits have to fit into the original bits for g
         iters = min iters0 (n-p-q)
         v_ishift = "ishift"
@@ -584,8 +453,8 @@ generateCBI name perm p iters0 = unlines $
           , "size_t " <> v_iblock_addr <> " = 0;"
           , "size_t " <> v_ishift <> " = 0;"
           ] ++ 
-          map generateAssign (genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
-          map generateAssign (genShift n p q perm v_ishift v_iblock_addr) ++
+          map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genShift n p q cols v_ishift v_iblock_addr) ++
           map generateAssign outer_input_assigns ++
           [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_in_addr <> " &= ~" <> show in_addr_mask <> "ULL;"
@@ -599,7 +468,8 @@ generateCBI name perm p iters0 = unlines $
           , "}"
           ]
         (inner_input_assigns, outer_input_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genInAddrIter n p q iters perm v_in_addr v_i v_j v_g v_iter)
+          partition (\(_, _, v_in, _, _) -> v_in == v_iter) 
+            (mergeAssigns $ genInAddrIter n p q iters cols v_in_addr v_i v_j v_g v_iter)
         in_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_input_assigns
                      & bitIdxsToInteger
         output_lines = 
@@ -608,8 +478,8 @@ generateCBI name perm p iters0 = unlines $
           , "size_t " <> v_oblock_addr <> " = 0;"
           , "size_t " <> v_oshift <> " = 0;"
           ] ++
-          map generateAssign (genOBlockAddrBasic n p q perm v_oblock_addr v_i v_j) ++
-          map generateAssign (genShift n p q perm v_oshift v_oblock_addr) ++
+          map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genShift n p q cols v_oshift v_oblock_addr) ++
           map generateAssign outer_output_assigns ++
           [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_out_addr <> " &= ~" <> show out_addr_mask <> "ULL;"
@@ -623,7 +493,68 @@ generateCBI name perm p iters0 = unlines $
           , "}"
           ]
         (inner_output_assigns, outer_output_assigns) = 
-          partition (\(_, _, v_in, _, _) -> v_in == v_iter) (genOutAddrIter n p q iters perm v_out_addr v_i v_j v_g v_iter)
+          partition (\(_, _, v_in, _, _) -> v_in == v_iter) 
+            (mergeAssigns $
+             map (\(v_out, out_idx, v_in, in_idx, ofs) -> (v_out, P.apply perm out_idx, v_in, in_idx, ofs)) $            
+             genOutAddrIter n p q iters cols v_out_addr v_i v_j v_g v_iter)
         out_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_output_assigns
                      & bitIdxsToInteger
         
+-- The parameters are :
+-- --^ p : (log) size we need for coalescing, typically 4 or 5.
+generateBmmcC :: String -> B.BMatrix -> Int -> String
+generateBmmcC name mat p = unlines $
+  [ comment $ "size of input and output arrays = 2^n"
+  , comment $ "thread group count = (2^(n-p-q), 1, 1)  group size = (2^p, 2^q, 1)"
+  , comment $ "n = " <> show n <> "  p = " <> show p <> "  q = " <> show q
+  , comment $ "cols = " <> show cols
+  --, comment $ "permutation = " <> show perm
+  , "__global__ void " <> kernel_name <> "(const int* " <> v_in <> ", int* " <> v_out <> ")"
+  , "{"
+  ] ++
+  map indent body_lines
+  ++
+  [ "}" ]
+  where n = B.rows mat 
+        -- The columns that are 'sparse'
+        cols = assert (length cols0 >= p) $ take p cols0
+          where cols0 = filter (\j -> all (\i -> not (B.get mat i j)) [p..n-1]) [0..n-1]
+        q = tally cols $ \j -> j >= p
+        kernel_name = "generateBmmcC_n" <> show n <> "_" <> name
+        v_out_tmp = "out_tmp"
+        body_lines =
+          [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
+          , "size_t " <> v_g <> " = blockIdx.x;"
+          , "size_t " <> v_i <> " = threadIdx.y;"
+          , "size_t " <> v_j <> " = threadIdx.x;"
+          , ""
+          ] ++
+          input_lines ++
+          [ ""
+          , comment "Synchronize"
+          , "__syncthreads();"
+          , ""
+          ] ++
+          output_lines
+        input_lines =  
+          [ comment "Read the input block"
+          , "size_t " <> v_in_addr <> " = 0;"
+          , "size_t " <> v_iblock_addr <> " = 0;"
+          ] ++ 
+          map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
+          map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
+          [ v_block <> "[" <> v_iblock_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];"
+          ]
+        output_lines = 
+          [ comment "Write the output block"
+          , "size_t " <> v_out_tmp <> " = 0;"
+          , "size_t " <> v_out_addr <> " = 0;"
+          , "size_t " <> v_oblock_addr <> " = 0;"
+          ] ++
+          map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
+          map generateAssign (mergeAssigns $ genOutAddrBasic n p q cols v_out_tmp v_i v_j v_g) ++
+          map (\i -> v_out_addr <> " |= (__popcll(" <> 
+            show (B.rowToInt $ B.getRow mat i) <> " & " <> v_out_tmp <> ") & 1) << " <> show i <> ";") 
+            [0..n-1] ++
+          [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> v_oblock_addr <> "];"
+          ]

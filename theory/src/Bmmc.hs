@@ -1,6 +1,6 @@
 module Bmmc (
   BMatrix, rows, cols, isSquare, 
-  make, makeCol, makeRow, get,
+  make, makeCol, makeRow, get, getCol, getRow,
   add, mult, transpose, empty, identity, zeros, ones,
   colToInt, rowToInt, colFromInt, rowFromInt,
   vstack, hstack, vsplit, hsplit,
@@ -38,6 +38,18 @@ get (BMatrix r c v) i j
   | 0 <= i && i < r && 0 <= j && j < c = v U.! (i * c + j)
   | otherwise = error "BMatrix.get: out of bounds access"
 
+-- Extract the given row from a matrix
+getRow :: BMatrix -> Int -> BMatrix
+getRow a i 
+  | 0 <= i && i < rows a = makeRow (cols a) $ \j -> get a i j
+  | otherwise = error "BMatrix.getRow: out of bounds access"
+
+-- Extract the given cplumn from a matrix
+getCol :: BMatrix -> Int -> BMatrix
+getCol a j 
+  | 0 <= j && j < cols a = makeCol (rows a) $ \i -> get a i j
+  | otherwise = error "BMatrix.getCol: out of bounds access"
+
 instance Show BMatrix where
   show a = intercalate "\n" $ map (prettyRow a) [0..rows a - 1]
     where prettyRow a i = concatMap (\j -> if get a i j then "1" else ".") [0..cols a - 1]
@@ -47,8 +59,7 @@ isSquare (BMatrix r c _) = r == c
 
 make :: Int -> Int -> (Int -> Int -> Bool) -> BMatrix
 make r c f = BMatrix r c (U.force v) 
-  where v = U.generate (r * c) $ \idx -> f (idx `div` c) (idx `mod` c)
-              
+  where v = U.generate (r * c) $ \idx -> f (idx `div` c) (idx `mod` c)        
 
 makeCol :: Int -> (Int -> Bool) -> BMatrix
 makeCol n f = make n 1 $ \i j -> f i
