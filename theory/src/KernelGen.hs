@@ -53,13 +53,26 @@ mergeAssigns xs = maybe xs mergeAssigns (msum $ map (uncurry $ tryMerge xs) ijs)
 
 generateAssign :: (String, Int, String, Int, [Int]) -> String
 generateAssign (v_out, out_idx, v_in, in_idx, offsets) = 
-  v_out <> " |= (" <> v_in <> " & " <> show mask <> ")" <> shift_code <> ";" 
-  where mask = bitIdxsToInteger offsets `shiftL` in_idx
-        shift_code 
-          | in_idx < out_idx  = " << " <> show (out_idx - in_idx)
-          | in_idx == out_idx = ""
-          | in_idx > out_idx  = " >> " <> show (in_idx - out_idx)
+  --v_out <> " |= (" <> v_in <> " & " <> show mask <> ")" <> shift_code <> ";" 
+  --where mask = bitIdxsToInteger offsets `shiftL` in_idx
+  --      shift_code 
+  --        | in_idx < out_idx  = " << " <> show (out_idx - in_idx)
+  --        | in_idx == out_idx = ""
+  --        | in_idx > out_idx  = " >> " <> show (in_idx - out_idx)
+  v_out <> " |= " <> (shift_output $ and $ shift_input v_in) <> ";"
+  where shift_input v 
+          | in_idx == 0 = v
+          | otherwise   = v <> " >> " <> show in_idx
+        shift_output v 
+          | out_idx == 0 = v
+          | otherwise    = "(" <> v <> ") << " <> show out_idx
+        and v 
+          | in_idx == 0 = v <> " & " <> show (bitIdxsToInteger offsets)
+          | otherwise   = "(" <> v <> ") & " <> show (bitIdxsToInteger offsets)
+  --v_out <> " |= " <> "((" <> v_in <> " >> " <> show in_idx <> ") & " <> show mask <> ") << " <> show out_idx <> ";" 
+  --where mask = bitIdxsToInteger offsets
         
+
 bitIdxsToInteger :: [Int] -> Integer
 bitIdxsToInteger is = foldl (.|.) 0 $ map (shiftL 1) is
 
@@ -164,17 +177,18 @@ genShift n p q cols v_shift v_block_addr = go 0 0
 
 -- Variable names used in every kernel
 v_in, v_out, v_block, v_g, v_i, v_j, v_in_addr, v_out_addr :: String
-v_iblock_addr, v_oblock_addr :: String
-v_in = "in_vect"
-v_out = "out_vect"
-v_block = "block"
-v_g = "g"
-v_i = "i"
-v_j = "j"
+v_iblock_addr, v_oblock_addr, t_size :: String
+v_in = "input"
+v_out = "output"
+v_block = "tile"
+v_g = "block"
+v_i = "warp"
+v_j = "thread"
 v_in_addr = "in_addr"
 v_out_addr = "out_addr"
-v_iblock_addr = "iblock_addr"
-v_oblock_addr = "oblock_addr"
+v_iblock_addr = "itile_addr"
+v_oblock_addr = "otile_addr"
+t_size = "int"
 
 -- This is the most naive kernel.
 generate :: String -> P.Perm -> String
@@ -193,10 +207,10 @@ generate name perm = unlines $
         p = 10
         kernel_name = "generate_n" <> show n <> "_" <> name
         body_lines =
-          [ "size_t " <> v_in_addr <> " = blockIdx.x * blockDim.x + threadIdx.x;"
+          [ t_size <> " " <> v_in_addr <> " = blockIdx.x * blockDim.x + threadIdx.x;"
           , ""
           , comment "Compute the output address"
-          , "size_t " <> v_out_addr <> " = 0;"
+          , t_size <> " " <> v_out_addr <> " = 0;"
           ] ++
           map generateAssign (mergeAssigns $ genOutAddrNaive n perm v_out_addr v_in_addr) ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];" ]
@@ -223,9 +237,9 @@ generateC name perm p = unlines $
         kernel_name = "generateC_n" <> show n <> "_" <> name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
-          , "size_t " <> v_g <> " = blockIdx.x;"
-          , "size_t " <> v_i <> " = threadIdx.y;"
-          , "size_t " <> v_j <> " = threadIdx.x;"
+          , t_size <> " " <> v_g <> " = blockIdx.x;"
+          , t_size <> " " <> v_i <> " = threadIdx.y;"
+          , t_size <> " " <> v_j <> " = threadIdx.x;"
           , ""
           ] ++
           input_lines ++
@@ -236,18 +250,18 @@ generateC name perm p = unlines $
           ] ++
           output_lines
         input_lines =  
-          [ comment "Read the input block"
-          , "size_t " <> v_in_addr <> " = 0;"
-          , "size_t " <> v_iblock_addr <> " = 0;"
+          [ comment "Read the input tile"
+          , t_size <> " " <> v_in_addr <> " = 0;"
+          , t_size <> " " <> v_iblock_addr <> " = 0;"
           ] ++ 
           map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
           map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
           [ v_block <> "[" <> v_iblock_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];"
           ]
         output_lines = 
-          [ comment "Write the output block"
-          , "size_t " <> v_out_addr <> " = 0;"
-          , "size_t " <> v_oblock_addr <> " = 0;"
+          [ comment "Write the output tile"
+          , t_size <> " " <> v_out_addr <> " = 0;"
+          , t_size <> " " <> v_oblock_addr <> " = 0;"
           ] ++
           map generateAssign (mergeAssigns $ 
             map (\(v_out, out_idx, v_in, in_idx, ofs) -> (v_out, P.apply perm out_idx, v_in, in_idx, ofs)) $
@@ -280,9 +294,9 @@ generateCB name perm p = unlines $
         kernel_name = "generateCB_n" <> show n <> "_" <> name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
-          , "size_t " <> v_g <> " = blockIdx.x;"
-          , "size_t " <> v_i <> " = threadIdx.y;"
-          , "size_t " <> v_j <> " = threadIdx.x;"
+          , t_size <> " " <> v_g <> " = blockIdx.x;"
+          , t_size <> " " <> v_i <> " = threadIdx.y;"
+          , t_size <> " " <> v_j <> " = threadIdx.x;"
           , ""
           ] ++
           input_lines ++
@@ -293,10 +307,10 @@ generateCB name perm p = unlines $
           ] ++
           output_lines
         input_lines =  
-          [ comment "Read the input block"
-          , "size_t " <> v_in_addr <> " = 0;"
-          , "size_t " <> v_iblock_addr <> " = 0;"
-          , "size_t " <> v_ishift <> " = 0;"
+          [ comment "Read the input tile"
+          , t_size <> " " <> v_in_addr <> " = 0;"
+          , t_size <> " " <> v_iblock_addr <> " = 0;"
+          , t_size <> " " <> v_ishift <> " = 0;"
           ] ++ 
           map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
           map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
@@ -307,10 +321,10 @@ generateCB name perm p = unlines $
             "] = " <> v_in <> "[" <> v_in_addr <> "];"
           ]
         output_lines = 
-          [ comment "Write the output block"
-          , "size_t " <> v_out_addr <> " = 0;"
-          , "size_t " <> v_oblock_addr <> " = 0;"
-          , "size_t " <> v_oshift <> " = 0;"
+          [ comment "Write the output tile"
+          , t_size <> " " <> v_out_addr <> " = 0;"
+          , t_size <> " " <> v_oblock_addr <> " = 0;"
+          , t_size <> " " <> v_oshift <> " = 0;"
           ] ++
           map generateAssign (mergeAssigns $ 
             map (\(v_out, out_idx, v_in, in_idx, ofs) -> (v_out, P.apply perm out_idx, v_in, in_idx, ofs)) $            
@@ -348,9 +362,9 @@ generateCI name perm p iters0 = unlines $
         kernel_name = "generateCI_n" <> show n <> "_" <> name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^iters * 2^p * 2^q) <> "];"
-          , "size_t " <> v_g <> " = blockIdx.x;"
-          , "size_t " <> v_i <> " = threadIdx.y;"
-          , "size_t " <> v_j <> " = threadIdx.x;"
+          , t_size <> " " <> v_g <> " = blockIdx.x;"
+          , t_size <> " " <> v_i <> " = threadIdx.y;"
+          , t_size <> " " <> v_j <> " = threadIdx.x;"
           , ""
           ] ++
           input_lines ++
@@ -361,13 +375,13 @@ generateCI name perm p iters0 = unlines $
           ] ++
           output_lines
         input_lines =  
-          [ comment "Read the input block"
-          , "size_t " <> v_in_addr <> " = 0;"
-          , "size_t " <> v_iblock_addr <> " = 0;"
+          [ comment "Read the input tiles"
+          , t_size <> " " <> v_in_addr <> " = 0;"
+          , t_size <> " " <> v_iblock_addr <> " = 0;"
           ] ++ 
           map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q perm v_iblock_addr v_i v_j) ++
           map generateAssign outer_input_assigns ++
-          [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
+          [ "for (" <> t_size <> " " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_in_addr <> " &= ~" <> show in_addr_mask <> "ULL;"
           ] ++
           map (indent . generateAssign) inner_input_assigns ++
@@ -382,13 +396,13 @@ generateCI name perm p iters0 = unlines $
         in_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_input_assigns
                      & bitIdxsToInteger
         output_lines = 
-          [ comment "Write the output block"
-          , "size_t " <> v_out_addr <> " = 0;"
-          , "size_t " <> v_oblock_addr <> " = 0;"
+          [ comment "Write the output tiles"
+          , t_size <> " " <> v_out_addr <> " = 0;"
+          , t_size <> " " <> v_oblock_addr <> " = 0;"
           ] ++
           map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           map generateAssign outer_output_assigns ++
-          [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
+          [ "for (" <> t_size <> " " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_out_addr <> " &= ~" <> show out_addr_mask <> "ULL;"
           ] ++
           map (indent . generateAssign) inner_output_assigns ++
@@ -435,9 +449,9 @@ generateCBI name perm p iters0 = unlines $
         kernel_name = "generateCBI_n" <> show n <> "_" <> name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^iters * 2^p * 2^q) <> "];"
-          , "size_t " <> v_g <> " = blockIdx.x;"
-          , "size_t " <> v_i <> " = threadIdx.y;"
-          , "size_t " <> v_j <> " = threadIdx.x;"
+          , t_size <> " " <> v_g <> " = blockIdx.x;"
+          , t_size <> " " <> v_i <> " = threadIdx.y;"
+          , t_size <> " " <> v_j <> " = threadIdx.x;"
           , ""
           ] ++
           input_lines ++
@@ -448,15 +462,15 @@ generateCBI name perm p iters0 = unlines $
           ] ++
           output_lines
         input_lines =  
-          [ comment "Read the input block"
-          , "size_t " <> v_in_addr <> " = 0;"
-          , "size_t " <> v_iblock_addr <> " = 0;"
-          , "size_t " <> v_ishift <> " = 0;"
+          [ comment "Read the input tiles"
+          , t_size <> " " <> v_in_addr <> " = 0;"
+          , t_size <> " " <> v_iblock_addr <> " = 0;"
+          , t_size <> " " <> v_ishift <> " = 0;"
           ] ++ 
           map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
           map generateAssign (mergeAssigns $ genShift n p q cols v_ishift v_iblock_addr) ++
           map generateAssign outer_input_assigns ++
-          [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
+          [ "for (" <> t_size <> " " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_in_addr <> " &= ~" <> show in_addr_mask <> "ULL;"
           ] ++
           map (indent . generateAssign) inner_input_assigns ++
@@ -473,15 +487,15 @@ generateCBI name perm p iters0 = unlines $
         in_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_input_assigns
                      & bitIdxsToInteger
         output_lines = 
-          [ comment "Write the output block"
-          , "size_t " <> v_out_addr <> " = 0;"
-          , "size_t " <> v_oblock_addr <> " = 0;"
-          , "size_t " <> v_oshift <> " = 0;"
+          [ comment "Write the output tiles"
+          , t_size <> " " <> v_out_addr <> " = 0;"
+          , t_size <> " " <> v_oblock_addr <> " = 0;"
+          , t_size <> " " <> v_oshift <> " = 0;"
           ] ++
           map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           map generateAssign (mergeAssigns $ genShift n p q cols v_oshift v_oblock_addr) ++
           map generateAssign outer_output_assigns ++
-          [ "for (size_t " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
+          [ "for (" <> t_size <> " " <> v_iter <> " = 0; " <> v_iter <> " < " <> show (2^iters) <> "; " <> v_iter <> "++) {" 
           , indent $ v_out_addr <> " &= ~" <> show out_addr_mask <> "ULL;"
           ] ++
           map (indent . generateAssign) inner_output_assigns ++
@@ -524,9 +538,9 @@ generateBmmcC name mat p = unlines $
         v_out_tmp = "out_tmp"
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
-          , "size_t " <> v_g <> " = blockIdx.x;"
-          , "size_t " <> v_i <> " = threadIdx.y;"
-          , "size_t " <> v_j <> " = threadIdx.x;"
+          , t_size <> " " <> v_g <> " = blockIdx.x;"
+          , t_size <> " " <> v_i <> " = threadIdx.y;"
+          , t_size <> " " <> v_j <> " = threadIdx.x;"
           , ""
           ] ++
           input_lines ++
@@ -538,8 +552,8 @@ generateBmmcC name mat p = unlines $
           output_lines
         input_lines =  
           [ comment "Read the input block"
-          , "size_t " <> v_in_addr <> " = 0;"
-          , "size_t " <> v_iblock_addr <> " = 0;"
+          , t_size <> " " <> v_in_addr <> " = 0;"
+          , t_size <> " " <> v_iblock_addr <> " = 0;"
           ] ++ 
           map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
           map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
@@ -547,9 +561,9 @@ generateBmmcC name mat p = unlines $
           ]
         output_lines = 
           [ comment "Write the output block"
-          , "size_t " <> v_out_tmp <> " = 0;"
-          , "size_t " <> v_out_addr <> " = 0;"
-          , "size_t " <> v_oblock_addr <> " = 0;"
+          , t_size <> " " <> v_out_tmp <> " = 0;"
+          , t_size <> " " <> v_out_addr <> " = 0;"
+          , t_size <> " " <> v_oblock_addr <> " = 0;"
           ] ++
           map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           map generateAssign (mergeAssigns $ genOutAddrBasic n p q cols v_out_tmp v_i v_j v_g) ++
@@ -585,9 +599,9 @@ generateBmmcCB name mat p = unlines $
         v_out_tmp = "out_tmp"
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
-          , "size_t " <> v_g <> " = blockIdx.x;"
-          , "size_t " <> v_i <> " = threadIdx.y;"
-          , "size_t " <> v_j <> " = threadIdx.x;"
+          , t_size <> " " <> v_g <> " = blockIdx.x;"
+          , t_size <> " " <> v_i <> " = threadIdx.y;"
+          , t_size <> " " <> v_j <> " = threadIdx.x;"
           , ""
           ] ++
           input_lines ++
@@ -599,9 +613,9 @@ generateBmmcCB name mat p = unlines $
           output_lines
         input_lines =  
           [ comment "Read the input block"
-          , "size_t " <> v_in_addr <> " = 0;"
-          , "size_t " <> v_iblock_addr <> " = 0;"
-          , "size_t " <> v_ishift <> " = 0;"
+          , t_size <> " " <> v_in_addr <> " = 0;"
+          , t_size <> " " <> v_iblock_addr <> " = 0;"
+          , t_size <> " " <> v_ishift <> " = 0;"
           ] ++ 
           map generateAssign (mergeAssigns $ genInAddrBasic n p q cols v_in_addr v_i v_j v_g) ++
           map generateAssign (mergeAssigns $ genIBlockAddrBasic n p q cols v_iblock_addr v_i v_j) ++
@@ -613,10 +627,10 @@ generateBmmcCB name mat p = unlines $
           ]
         output_lines = 
           [ comment "Write the output block"
-          , "size_t " <> v_out_tmp <> " = 0;"
-          , "size_t " <> v_out_addr <> " = 0;"
-          , "size_t " <> v_oblock_addr <> " = 0;"
-          , "size_t " <> v_oshift <> " = 0;"
+          , t_size <> " " <> v_out_tmp <> " = 0;"
+          , t_size <> " " <> v_out_addr <> " = 0;"
+          , t_size <> " " <> v_oblock_addr <> " = 0;"
+          , t_size <> " " <> v_oshift <> " = 0;"
           ] ++
           map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           map generateAssign (mergeAssigns $ genShift n p q cols v_oshift v_oblock_addr) ++

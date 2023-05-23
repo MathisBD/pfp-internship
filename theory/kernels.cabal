@@ -28,7 +28,8 @@ test-suite test
     hs-source-dirs:   tests
     main-is:          Test.hs
     other-modules:    PermTests,
-                      BmmcTests
+                      BmmcTests,
+                      ParmMatrixTests
     build-depends:    tasty >= 1.4.3,
                       tasty-quickcheck >= 0.10,
                       kernels
