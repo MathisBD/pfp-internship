@@ -1,6 +1,11 @@
 module KernelGen (
   KernelGen.generate, generateC, generateCB, generateCI, generateCBI,
-  generateBmmcC, generateBmmcCB
+  generateBmmcC, generateBmmcCB,
+  mergeAssigns,
+  genOutAddrNaive, 
+  genOutAddrBasic, genInAddrBasic, genIBlockAddrBasic, genOBlockAddrBasic,
+  genInAddrIter, genOutAddrIter,
+  genShift
 ) where
 
 import qualified Bmmc as B
@@ -53,22 +58,22 @@ mergeAssigns xs = maybe xs mergeAssigns (msum $ map (uncurry $ tryMerge xs) ijs)
 
 generateAssign :: (String, Int, String, Int, [Int]) -> String
 generateAssign (v_out, out_idx, v_in, in_idx, offsets) = 
-  --v_out <> " |= (" <> v_in <> " & " <> show mask <> ")" <> shift_code <> ";" 
-  --where mask = bitIdxsToInteger offsets `shiftL` in_idx
-  --      shift_code 
-  --        | in_idx < out_idx  = " << " <> show (out_idx - in_idx)
-  --        | in_idx == out_idx = ""
-  --        | in_idx > out_idx  = " >> " <> show (in_idx - out_idx)
-  v_out <> " |= " <> (shift_output $ and $ shift_input v_in) <> ";"
-  where shift_input v 
-          | in_idx == 0 = v
-          | otherwise   = v <> " >> " <> show in_idx
-        shift_output v 
-          | out_idx == 0 = v
-          | otherwise    = "(" <> v <> ") << " <> show out_idx
-        and v 
-          | in_idx == 0 = v <> " & " <> show (bitIdxsToInteger offsets)
-          | otherwise   = "(" <> v <> ") & " <> show (bitIdxsToInteger offsets)
+  v_out <> " |= " <> shift (v_in <> " & " <> show mask) <> ";" 
+  where mask = bitIdxsToInteger offsets `shiftL` in_idx
+        shift x
+          | in_idx < out_idx  = "(" <> x <> ") << " <> show (out_idx - in_idx)
+          | in_idx == out_idx = x
+          | in_idx > out_idx  = "(" <> x <> ") >> " <> show (in_idx - out_idx)
+  --v_out <> " |= " <> (shift_output $ and $ shift_input v_in) <> ";"
+  --where shift_input v 
+  --        | in_idx == 0 = v
+  --        | otherwise   = v <> " >> " <> show in_idx
+  --      shift_output v 
+  --        | out_idx == 0 = v
+  --        | otherwise    = "(" <> v <> ") << " <> show out_idx
+  --      and v 
+  --        | in_idx == 0 = v <> " & " <> show (bitIdxsToInteger offsets)
+  --        | otherwise   = "(" <> v <> ") & " <> show (bitIdxsToInteger offsets)
   --v_out <> " |= " <> "((" <> v_in <> " >> " <> show in_idx <> ") & " <> show mask <> ") << " <> show out_idx <> ";" 
   --where mask = bitIdxsToInteger offsets
         

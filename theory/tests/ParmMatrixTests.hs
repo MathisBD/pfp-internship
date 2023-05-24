@@ -11,9 +11,11 @@ import Test.Tasty.QuickCheck hiding ( (.&.) )
 import qualified Perm as P
 import qualified Bmmc as B
 import Data.Bits
+import Data.List ( sort )
+
 
 parmMatrixTests :: TestTree
-parmMatrixTests = testGroup "Parm Matrix Tests" 
+parmMatrixTests = localOption (QuickCheckTests 10000) $ testGroup "Parm Matrix Tests" 
   [ testProperty "parm-matrix-inv" parmMatrixInvProp
   , testProperty "parm-matrix-correct" $ 
       forAllShrink (choose (0, 10)) shrink $ \n -> 
@@ -28,8 +30,12 @@ parmMatrixInvProp n mask =
 parmMatrixCorrectProp :: Int -> Integer -> Property 
 parmMatrixCorrectProp n mask = 
   0 < n ==> n <= 10 ==> 0 < mask ==> mask < 2^n ==> 
-    parm mask replicateMin xs == parmWithBmmc mask replicateMin xs
+    forAllShrink (choose (0, 2^(n-1)-1)) shrink $ \k ->
+      parm mask (replicateKth k) xs == parmWithBmmc mask (replicateKth k) xs
   where xs = [0..2^n - 1]
+
+replicateKth :: Ord a => Int -> [a] -> [a]
+replicateKth k xs = replicate (length xs) (xs !! k)
 
 
 -- Seperate a list in two.
@@ -80,10 +86,6 @@ two f xs = f ls ++ f rs
 --  | k `mod` 4 == 1 = que (col (removeBit 1 k) f g) xs
 --  | k `mod` 4 == 2 = ilv (col (removeBit 0 k) f g) xs
 --  | k `mod` 4 == 3 = vee (col (removeBit 0 k) f g) xs
-
-
-replicateMin :: Ord a => [a] -> [a]
-replicateMin xs = replicate (length xs) (minimum xs)
 
 permuteBMMC :: B.BMatrix -> [a] -> [a]
 permuteBMMC a xs = map (\i -> xs !! src i) [0..length xs - 1]
