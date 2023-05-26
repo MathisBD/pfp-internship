@@ -8,8 +8,8 @@ import ParmMatrixTests ( parmMatrixTests )
 
 main :: IO ()
 main = defaultMain $ testGroup "All Tests" 
-  [ parmMatrixTests
+  [ permTests
+  , parmMatrixTests
   , bmmcTests
-  , permTests
   ]
 

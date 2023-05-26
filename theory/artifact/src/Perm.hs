@@ -2,11 +2,13 @@ module Perm (
   Perm, size, fromList, toList, make,
   identity, Perm.reverse, swap,
   compose, inverse, apply, permute,
-  generateAll, generateRandom
+  randPerm
 ) where 
 
 import System.Random ( randomIO, randomRIO )
 import qualified Data.Vector.Unboxed as U
+import qualified Test.Tasty.QuickCheck as QC
+
 
 -- The permutation is defined as the mapping between the indices
 -- and the corresponding elements.
@@ -45,30 +47,12 @@ swap n k1 k2 = make n $ \i -> if i == k1 then k2
                               else if i == k2 then k1
                               else i
 
--- Generate all permutations on n elements.
-generateAll :: Int -> [Perm]
-generateAll 0 = [U.empty]
-generateAll n = do
-  -- Choose the image of the first element
-  first <- [0..n-1]
-  -- Choose the image of the other n-1 elements
-  rest <- generateAll (n-1)
-  -- Combine them 
-  pure $ make n $ \i -> 
-    if i == 0 then first else 
-    let x = apply rest i in if x < first then x else x + 1
+-- A random permutation on n elements
+randPerm :: Int -> QC.Gen Perm
+randPerm n = fromList <$> QC.shuffle [0..n-1] 
 
-generateRandom :: Int -> IO Perm
-generateRandom 0 = pure U.empty
-generateRandom n = do
-  -- Choose the image of the first element
-  first <- randomRIO (0, n-1)
-  -- Choose the image of the other n-1 elements
-  rest <- generateRandom (n-1)
-  -- Combine them 
-  pure $ make n $ \i -> 
-    if i == 0 then first else 
-    let x = apply rest (i-1) in if x < first then x else x + 1
+instance QC.Arbitrary Perm where
+  arbitrary = QC.sized randPerm
 
 -- Compose two permutations :
 --   compose p2 p1 == p2 . p1 

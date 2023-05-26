@@ -13,7 +13,9 @@ common shared-properties
                         Unique >= 0.4.7,
                         random >= 1.2.1,
                         vector >= 0.13,
-                        extra >= 1.7.13
+                        extra >= 1.7.13,
+                        tasty >= 1.4.3,
+                        tasty-quickcheck >= 0.10,
     default-extensions: FlexibleInstances
 
 executable main
@@ -30,9 +32,7 @@ test-suite test
     other-modules:    PermTests,
                       BmmcTests,
                       ParmMatrixTests
-    build-depends:    tasty >= 1.4.3,
-                      tasty-quickcheck >= 0.10,
-                      kernels
+    build-depends:    kernels
     
 library   
     import:           shared-properties

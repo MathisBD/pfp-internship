@@ -8,7 +8,8 @@ module Bmmc (
   reducedRowEchelon, inverse, isInvertible, unsafeInverse,
   blockDiag, rank,
   transformInt,
-  decomposeLUP, decomposeULP
+  decomposeLUP, decomposeULP,
+  randMatrix, randInvMatrix
 ) where
 
 import Data.Bits ( Bits(shiftR, xor, (.|.), shiftL) )
@@ -21,6 +22,7 @@ import Control.Monad.Extra ( findM )
 import Control.Monad ( when )
 import Data.Foldable ( forM_ )
 import qualified Perm as P
+import qualified Test.Tasty.QuickCheck as QC
 
 
 -- Rectangular boolean matrices. The first two arguments are the number of rows and columns.
@@ -254,3 +256,54 @@ decomposeULP a
         (l', u', p') = decomposeLUP (r `mult` a `mult` r)
         r = fromPerm $ P.reverse n
         n = rows a
+
+
+-- An arbitrary matrix
+randMatrix :: Int -> Int -> QC.Gen BMatrix
+randMatrix rows cols = do 
+  contents <- QC.vectorOf (rows * cols) QC.arbitrary
+  pure $ make rows cols $ \i j -> contents !! (i * cols + j)         
+
+-- An arbitrary upper invertible matrix
+randUpperInvMatrix :: Int -> QC.Gen BMatrix
+randUpperInvMatrix n = do
+  a <- randMatrix n n
+  pure $ make n n $ \i j -> 
+                if i == j then True 
+                else if i < j then get a i j
+                else False
+
+-- An arbitrary lower invertible matrix
+randLowerInvMatrix :: Int -> QC.Gen BMatrix
+randLowerInvMatrix n = transpose <$> randUpperInvMatrix n
+
+-- An arbitrary permutation matrix
+randPermMatrix :: Int -> QC.Gen BMatrix
+randPermMatrix n = fromPerm <$> P.randPerm n
+
+-- An arbitrary (square) invertible matrix
+randInvMatrix :: Int -> QC.Gen BMatrix
+randInvMatrix n = do
+  upper <- randUpperInvMatrix n
+  lower <- randLowerInvMatrix n
+  perm <- randPermMatrix n
+  pure $ upper `mult` lower `mult` perm
+
+instance QC.Arbitrary BMatrix where
+  arbitrary = QC.frequency 
+    [ (1, pure empty)
+    , -- We have to hack around the limitation that there can only be 
+      -- a single size parameter for a generator
+      (5, QC.sized $ \s ->
+        do let s' = max s 2
+           rows <- QC.choose (1, s'-1)
+           randMatrix rows (s' - rows))
+    , (1, QC.sized randPermMatrix)  
+    , (5, QC.sized randInvMatrix)
+    ]
+  shrink a = (if c >= 2 then pairToList (hsplit (c `div` 2) a) else [])
+           ++ (if r >= 2 then pairToList (vsplit (r `div` 2) a) else [])
+    where pairToList (x, y) = [x, y]
+          r = rows a
+          c = cols a
+    

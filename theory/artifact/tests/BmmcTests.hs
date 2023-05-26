@@ -27,10 +27,10 @@ bmmcTests = testGroup "BMMC Tests"
   , testProperty "vsplit-size" vsplitSizeProp
   , testProperty "row-from-to-int" rowFromToInt
   , testProperty "row-to-from-int" $
-      forAllShrink (sized $ \n -> randMatrix 1 n) shrink rowToFromInt
+      forAllShrink (sized $ \n -> B.randMatrix 1 n) shrink rowToFromInt
   , testProperty "col-from-to-int" colFromToInt
   , testProperty "col-to-from-int" $
-      forAllShrink (sized $ \n -> randMatrix n 1) shrink colToFromInt
+      forAllShrink (sized $ \n -> B.randMatrix n 1) shrink colToFromInt
   , testProperty "inv" invProp
   , testProperty "inv-inv" invInvProp
   , testProperty "inv-mult" invMultProp
@@ -44,63 +44,6 @@ bmmcTests = testGroup "BMMC Tests"
   , testProperty "decomposeULP" decomposeULPProp
   , testProperty "decomposeLUP" decomposeLUPProp
   ]
-
-instance Arbitrary P.Perm where
-  arbitrary = sized $ \n -> 
-    P.fromList <$> shuffle [0..n-1] 
-
-
--- An arbitrary matrix
-randMatrix :: Int -> Int -> Gen B.BMatrix
-randMatrix rows cols = do 
-  contents <- vectorOf (rows * cols) arbitrary
-  pure $ B.make rows cols $ \i j -> contents !! (i * cols + j)         
-
--- An arbitrary upper invertible matrix
-randUpperInvMatrix :: Int -> Gen B.BMatrix
-randUpperInvMatrix n = do
-  a <- randMatrix n n
-  pure $ B.make n n $ \i j -> 
-                if i == j then True 
-                else if i < j then B.get a i j
-                else False
-
--- An arbitrary lower invertible matrix
-randLowerInvMatrix :: Int -> Gen B.BMatrix
-randLowerInvMatrix n = B.transpose <$> randUpperInvMatrix n
-
--- An arbitrary permutation matrix
-randPermMatrix :: Int -> Gen B.BMatrix
-randPermMatrix n = B.fromPerm . P.fromList <$> shuffle [0..n-1]
-  
--- An arbitrary invertible matrix
-randInvMatrix :: Int -> Gen B.BMatrix
-randInvMatrix n = do
-  upper <- randUpperInvMatrix n
-  lower <- randLowerInvMatrix n
-  perm <- randPermMatrix n
-  pure $ upper `B.mult` lower `B.mult` perm
-
-
-instance Arbitrary B.BMatrix where
-  arbitrary = frequency 
-    [ (1, pure B.empty)
-    , -- We have to hack around the limitation that there can only be 
-      -- a single size parameter for a generator
-      (5, sized $ \s ->
-        do let s' = max s 2
-           rows <- choose (1, s'-1)
-           randMatrix rows (s' - rows))
-    , (1, sized $ \n -> randPermMatrix n)  
-    , (5, sized $ \n -> randInvMatrix n)
-    ]
-
-  shrink a = (if c >= 2 then pairToList (B.hsplit (c `div` 2) a) else [])
-           ++ (if r >= 2 then pairToList (B.vsplit (r `div` 2) a) else [])
-    where pairToList (x, y) = [x, y]
-          r = B.rows a
-          c = B.cols a
-    
 
 emptySizeProp :: Property
 emptySizeProp = B.rows B.empty == 0 .&&. B.cols B.empty == 0

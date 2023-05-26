@@ -23,10 +23,6 @@ permTests = testGroup "Permutation Tests"
   , testProperty "to-matrix-permute" toMatrixPermuteProp
   ]
 
-instance Arbitrary P.Perm where
-  arbitrary = sized $ \n -> 
-    P.fromList <$> shuffle [0..n-1] 
-
 isPermutation :: Ord a => [a] -> [a] -> Bool
 isPermutation xs ys = sort xs == sort ys
 

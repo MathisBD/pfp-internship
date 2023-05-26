@@ -1,6 +1,6 @@
 module KernelGen (
   KernelGen.generate, generateC, generateCB, generateCI, generateCBI,
-  generateBmmcC, generateBmmcCB,
+  generateBmmc, generateBmmcC, generateBmmcCB,
   mergeAssigns,
   genOutAddrNaive, 
   genOutAddrBasic, genInAddrBasic, genIBlockAddrBasic, genOBlockAddrBasic,
@@ -31,6 +31,7 @@ comment str = "// " ++ str
 indent :: String -> String
 indent str = "    " ++ str
 
+-- Delete the elements at a the given indices in a list. 
 removeIndices :: [Int] -> [a] -> [a]
 removeIndices is xs = go 0 (sortUniq is) xs
   where go k [] xs = xs
@@ -58,26 +59,13 @@ mergeAssigns xs = maybe xs mergeAssigns (msum $ map (uncurry $ tryMerge xs) ijs)
 
 generateAssign :: (String, Int, String, Int, [Int]) -> String
 generateAssign (v_out, out_idx, v_in, in_idx, offsets) = 
-  v_out <> " |= " <> shift (v_in <> " & " <> show mask) <> ";" 
+  v_out <> " |= " <> shift (v_in <> " & " <> show mask <> "ULL") <> ";" 
   where mask = bitIdxsToInteger offsets `shiftL` in_idx
         shift x
           | in_idx < out_idx  = "(" <> x <> ") << " <> show (out_idx - in_idx)
           | in_idx == out_idx = x
           | in_idx > out_idx  = "(" <> x <> ") >> " <> show (in_idx - out_idx)
-  --v_out <> " |= " <> (shift_output $ and $ shift_input v_in) <> ";"
-  --where shift_input v 
-  --        | in_idx == 0 = v
-  --        | otherwise   = v <> " >> " <> show in_idx
-  --      shift_output v 
-  --        | out_idx == 0 = v
-  --        | otherwise    = "(" <> v <> ") << " <> show out_idx
-  --      and v 
-  --        | in_idx == 0 = v <> " & " <> show (bitIdxsToInteger offsets)
-  --        | otherwise   = "(" <> v <> ") & " <> show (bitIdxsToInteger offsets)
-  --v_out <> " |= " <> "((" <> v_in <> " >> " <> show in_idx <> ") & " <> show mask <> ") << " <> show out_idx <> ";" 
-  --where mask = bitIdxsToInteger offsets
-        
-
+  
 bitIdxsToInteger :: [Int] -> Integer
 bitIdxsToInteger is = foldl (.|.) 0 $ map (shiftL 1) is
 
@@ -182,7 +170,7 @@ genShift n p q cols v_shift v_block_addr = go 0 0
 
 -- Variable names used in every kernel
 v_in, v_out, v_block, v_g, v_i, v_j, v_in_addr, v_out_addr :: String
-v_iblock_addr, v_oblock_addr, t_size :: String
+v_iblock_addr, v_oblock_addr :: String
 v_in = "input"
 v_out = "output"
 v_block = "tile"
@@ -193,9 +181,13 @@ v_in_addr = "in_addr"
 v_out_addr = "out_addr"
 v_iblock_addr = "itile_addr"
 v_oblock_addr = "otile_addr"
-t_size = "int"
+t_size :: String
+t_size = "size_t"
+popc :: String
+popc = "__popcll"
 
--- This is the most naive kernel.
+-- Generate the CUDA code for a kernel that performs the given BPC permutation.
+-- This is the naive version.
 generate :: String -> P.Perm -> String
 generate name perm = unlines $
   [ comment $ "size of input and output arrays = 2^n"
@@ -210,7 +202,9 @@ generate name perm = unlines $
   [ "}" ]
   where n = P.size perm 
         p = 10
-        kernel_name = "generate_n" <> show n <> "_" <> name
+        kernel_name 
+          | name == "" = "generate_n" <> show n
+          | otherwise  = name
         body_lines =
           [ t_size <> " " <> v_in_addr <> " = blockIdx.x * blockDim.x + threadIdx.x;"
           , ""
@@ -220,9 +214,10 @@ generate name perm = unlines $
           map generateAssign (mergeAssigns $ genOutAddrNaive n perm v_out_addr v_in_addr) ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];" ]
 
--- Generate the CUDA code for a kernel that performs the given bit-permutation.
+-- Generate the CUDA code for a kernel that performs the given BPC permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
+-- This is the tile version.
 generateC :: String -> P.Perm -> Int -> String
 generateC name perm p = unlines $
   [ comment $ "size of input and output arrays = 2^n"
@@ -239,7 +234,9 @@ generateC name perm p = unlines $
   where n = P.size perm 
         cols = filter (\j -> P.apply perm j < p) [0..n-1]
         q = tally cols $ \j -> j >= p
-        kernel_name = "generateC_n" <> show n <> "_" <> name
+        kernel_name 
+          | name == "" = "generateC_n" <> show n
+          | otherwise  = name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
           , t_size <> " " <> v_g <> " = blockIdx.x;"
@@ -275,10 +272,10 @@ generateC name perm p = unlines $
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> v_oblock_addr <> "];"
           ]
 
--- Generate the CUDA code for a kernel that performs the given bit-permutation.
+-- Generate the CUDA code for a kernel that performs the given BPC permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
--- This version should avoid bank conflicts
+-- This is the tile + banks version.
 generateCB :: String -> P.Perm -> Int -> String
 generateCB name perm p = unlines $
   [ comment $ "size of input and output arrays = 2^n"
@@ -296,7 +293,9 @@ generateCB name perm p = unlines $
         q = tally cols $ \j -> j >= p
         v_ishift = "ishift"
         v_oshift = "oshift"
-        kernel_name = "generateCB_n" <> show n <> "_" <> name
+        kernel_name 
+          | name == "" = "generateCB_n" <> show n
+          | otherwise  = name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
           , t_size <> " " <> v_g <> " = blockIdx.x;"
@@ -341,11 +340,11 @@ generateCB name perm p = unlines $
               "((" <> v_oshift <> " + " <> v_oblock_addr <> ") & " <> show (2^p-1) <> ")"
             <> "];"
           ]
--- Generate the CUDA code for a kernel that performs the given bit-permutation.
+-- Generate the CUDA code for a kernel that performs the given BPC permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
 -- --^ iters : (log) number of iterations each thread will execute, typically between 0 and 4.
--- In this version the iter bits are taken from the lower bits of g. 
+-- This is the tile + iters version. 
 generateCI :: String -> P.Perm -> Int -> Int -> String
 generateCI name perm p iters0 = unlines $
   [ comment $ "size of input and output arrays = 2^n"
@@ -364,7 +363,9 @@ generateCI name perm p iters0 = unlines $
         -- The iteration bits have to fit into the original bits for g
         iters = min iters0 (n-p-q)
         v_iter = "iter"
-        kernel_name = "generateCI_n" <> show n <> "_" <> name
+        kernel_name 
+          | name == "" = "generateCI_n" <> show n
+          | otherwise  = name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^iters * 2^p * 2^q) <> "];"
           , t_size <> " " <> v_g <> " = blockIdx.x;"
@@ -425,12 +426,11 @@ generateCI name perm p iters0 = unlines $
                      & bitIdxsToInteger
 
               
-
--- Generate the CUDA code for a kernel that performs the given bit-permutation.
+-- Generate the CUDA code for a kernel that performs the given BPC permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
 -- --^ iters : (log) number of iterations each thread will execute, typically between 0 and 4.
--- In this version the iter bits are taken from the lower bits of g. 
+-- This is the tile + banks + iters version. 
 generateCBI :: String -> P.Perm -> Int -> Int -> String
 generateCBI name perm p iters0 = unlines $
   [ comment $ "size of input and output arrays = 2^n"
@@ -451,7 +451,9 @@ generateCBI name perm p iters0 = unlines $
         v_ishift = "ishift"
         v_oshift = "oshift"
         v_iter = "iter"
-        kernel_name = "generateCBI_n" <> show n <> "_" <> name
+        kernel_name 
+          | name == "" = "generateCBI_n" <> show n
+          | otherwise  = name
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^iters * 2^p * 2^q) <> "];"
           , t_size <> " " <> v_g <> " = blockIdx.x;"
@@ -518,9 +520,41 @@ generateCBI name perm p iters0 = unlines $
              genOutAddrIter n p q iters cols v_out_addr v_i v_j v_g v_iter)
         out_addr_mask = concatMap (\(_, out_idx, _, _, offsets) -> map (+ out_idx) offsets) inner_output_assigns
                      & bitIdxsToInteger
-        
+
+-- Generate the CUDA code for a kernel that performs the given tiled BMMC permutation.
+-- This is the naive version.
+generateBmmc :: String -> B.BMatrix -> String
+generateBmmc name mat = unlines $
+  [ comment $ "size of input and output arrays = 2^n"
+  , comment $ "thread group count = (2^n / group_size, 1, 1)  group size = (group_size, 1, 1)"
+  , comment $ "n = " <> show n  
+  , "__global__ void " <> kernel_name <> "(const int* " <> v_in <> ", int* " <> v_out <> ")"
+  , "{"
+  ] ++
+  map indent body_lines
+  ++
+  [ "}" ]
+  where n = B.rows mat 
+        p = 10
+        kernel_name 
+          | name == "" = "generate_n" <> show n
+          | otherwise  = name
+        body_lines =
+          [ t_size <> " " <> v_in_addr <> " = blockIdx.x * blockDim.x + threadIdx.x;"
+          , ""
+          , comment "Compute the output address"
+          , t_size <> " " <> v_out_addr <> " = 0;"
+          ] ++
+          map (\i -> v_out_addr <> " |= (" <> popc <> "(" <> 
+            show (B.rowToInt $ B.getRow mat i) <> "ULL & " <> v_in_addr <> ") & 1) << " <> show i <> ";") 
+            [0..n-1] ++
+          [ v_out <> "[" <> v_out_addr <> "] = " <> v_in <> "[" <> v_in_addr <> "];" ]
+
+
+-- Generate the CUDA code for a kernel that performs the given tiled BMMC permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
+-- This is the tile version.
 generateBmmcC :: String -> B.BMatrix -> Int -> String
 generateBmmcC name mat p = unlines $
   [ comment $ "size of input and output arrays = 2^n"
@@ -539,7 +573,9 @@ generateBmmcC name mat p = unlines $
         cols = assert (length cols0 >= p) $ take p cols0
           where cols0 = filter (\j -> all (\i -> not (B.get mat i j)) [p..n-1]) [0..n-1]
         q = tally cols $ \j -> j >= p
-        kernel_name = "generateBmmcC_n" <> show n <> "_" <> name
+        kernel_name 
+          | name == "" = "generateBmmcC_n" <> show n
+          | otherwise  = name
         v_out_tmp = "out_tmp"
         body_lines =
           [ "__shared__ int " <> v_block <> "[" <> show (2^p * 2^q) <> "];"
@@ -572,14 +608,16 @@ generateBmmcC name mat p = unlines $
           ] ++
           map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           map generateAssign (mergeAssigns $ genOutAddrBasic n p q cols v_out_tmp v_i v_j v_g) ++
-          map (\i -> v_out_addr <> " |= (__popcll(" <> 
-            show (B.rowToInt $ B.getRow mat i) <> " & " <> v_out_tmp <> ") & 1) << " <> show i <> ";") 
+          map (\i -> v_out_addr <> " |= (" <> popc <> "(" <> 
+            show (B.rowToInt $ B.getRow mat i) <> "ULL & " <> v_out_tmp <> ") & 1) << " <> show i <> ";") 
             [0..n-1] ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> v_oblock_addr <> "];"
           ]
 
+-- Generate the CUDA code for a kernel that performs the given tiled BMMC permutation.
 -- The parameters are :
 -- --^ p : (log) size we need for coalescing, typically 4 or 5.
+-- This is the tile + banks version.
 generateBmmcCB :: String -> B.BMatrix -> Int -> String
 generateBmmcCB name mat p = unlines $
   [ comment $ "size of input and output arrays = 2^n"
@@ -598,7 +636,9 @@ generateBmmcCB name mat p = unlines $
         cols = assert (length cols0 >= p) $ take p cols0
           where cols0 = filter (\j -> all (\i -> not (B.get mat i j)) [p..n-1]) [0..n-1]
         q = tally cols $ \j -> j >= p
-        kernel_name = "generateBmmcCB_n" <> show n <> "_" <> name
+        kernel_name 
+          | name == "" = "generateBmmcCB_n" <> show n
+          | otherwise  = name
         v_ishift = "ishift"
         v_oshift = "oshift"
         v_out_tmp = "out_tmp"
@@ -640,8 +680,8 @@ generateBmmcCB name mat p = unlines $
           map generateAssign (mergeAssigns $ genOBlockAddrBasic n p q cols v_oblock_addr v_i v_j) ++
           map generateAssign (mergeAssigns $ genShift n p q cols v_oshift v_oblock_addr) ++
           map generateAssign (mergeAssigns $ genOutAddrBasic n p q cols v_out_tmp v_i v_j v_g) ++
-          map (\i -> v_out_addr <> " |= (__popcll(" <> 
-            show (B.rowToInt $ B.getRow mat i) <> " & " <> v_out_tmp <> ") & 1) << " <> show i <> ";") 
+          map (\i -> v_out_addr <> " |= (" <> popc <> "(" <> 
+            show (B.rowToInt $ B.getRow mat i) <> "ULL & " <> v_out_tmp <> ") & 1) << " <> show i <> ";") 
             [0..n-1] ++
           [ v_out <> "[" <> v_out_addr <> "] = " <> v_block <> "[" <> 
               "(" <> v_oblock_addr <> " & " <> show ((2^q-1) * 2^p) <> ") + " <> 
