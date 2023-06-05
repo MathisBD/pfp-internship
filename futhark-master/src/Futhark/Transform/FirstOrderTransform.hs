@@ -366,6 +366,8 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
 
   -- Wrap up the above into a for-loop.
   letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
+transformSOAC pat (Parm {}) = error "transformSOAC: Parm should be converted to BMMCs beforehand."
+      
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::

@@ -419,6 +419,8 @@ library
       Futhark.Util.Pretty
       Futhark.Util.ProgressBar
       Futhark.Util.Table
+      Futhark.Util.Perm
+      Futhark.Util.BMatrix
       Futhark.Version
       Language.Futhark
       Language.Futhark.Core
@@ -540,6 +542,8 @@ test-suite unit
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
+      Futhark.Util.PermTests
+      Futhark.Util.BMatrixTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests

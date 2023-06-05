@@ -173,8 +173,10 @@ import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
 import Futhark.Util.Pretty (Pretty, prettyString, prettyText)
+import Futhark.Util.BMatrix qualified as BMatrix
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
+
 
 -- | A pattern is conceptually just a list of names and their types.
 newtype Pat dec = Pat {patElems :: [PatElem dec]}
@@ -385,6 +387,8 @@ data BasicOp
   | -- | Update an accumulator at the given index with the given value.
     -- Consumes the accumulator and produces a new one.
     UpdateAcc VName [SubExp] [SubExp]
+  | -- | Perform a BMMC permutation on a one-dimensional array.
+    Bmmc BMatrix.BMatrix VName
   deriving (Eq, Ord, Show)
 
 -- | The input to a 'WithAcc' construct.  Comprises the index space of

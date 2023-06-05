@@ -126,6 +126,8 @@ data SOAC rep
     -- <input-arrays> is a list of input arrays, all having the shape [<length>].
     -- <lambda> is the lambda that is applied to the inputs partitioned according to the masks.
     Parm SubExp VName SubExp [VName] (Lambda rep)
+  | -- | @Two <nest> <input-length> <input-arrays> <lambda>
+    Two SubExp SubExp [VName]
   | -- FIXME: this should not be here
     JVP (Lambda rep) [SubExp] [SubExp]
   | -- FIXME: this should not be here
