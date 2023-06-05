@@ -68,3 +68,9 @@ The 'lowerAllocationsGPUMem :: Pass GPUMem GPUMem' is the opposite of the previo
 
 The 'ArrayShortCircuiting.optimiseGPUMem' pass tries to remove unnecessary copies by constructing an array directly in the memory block it will be copied to. See the LMAD paper for more details.
 
+Array combinators on the GPU
+
+Optimal usage of the memory system is a key element of fast GPU algorithms. Unfortunately for many common algorithms this is hard to achieve and time consuming when done naively, even when using a high-level programming language such as Futhark. In this talk I will describe a set of high level array combinators (similar to map, reduce, filter, etc.) that raise the level of abstraction when thinking about memory access patterns on the GPU, but still allow for compilation to efficient GPU code. These combinators also give rise to a rich fusion algebra which will prove useful when compiling them.
+
+
+
