@@ -117,6 +117,13 @@ simplifySOAC (Hist w imgs ops bfun) = do
   imgs' <- mapM Engine.simplify imgs
   (bfun', bfun_hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty bfun
   pure (Hist w' imgs' ops' bfun', mconcat hoisted <> bfun_hoisted)
+simplifySOAC (Parm masks_len masks arr_len arrs lam) = do
+  masks_len' <- Engine.simplify masks_len
+  masks' <- Engine.simplify masks
+  arr_len' <- Engine.simplify arr_len
+  arrs' <- Engine.simplify arrs
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  pure (Parm masks_len' masks' arr_len' arrs' lam', hoisted)
 simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   (scans', scans_hoisted) <- fmap unzip $
     forM scans $ \(Scan lam nes) -> do

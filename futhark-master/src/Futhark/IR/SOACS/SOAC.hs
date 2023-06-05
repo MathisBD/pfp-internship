@@ -439,6 +439,13 @@ mapSOACM tv (Hist w arrs ops bucket_fun) =
       )
       ops
     <*> mapOnSOACLambda tv bucket_fun
+mapSOACM tv (Parm masks_len masks arrs_len arrs lam) =
+  Parm 
+    <$> mapOnSOACSubExp tv masks_len
+    <*> mapOnSOACVName tv masks
+    <*> mapOnSOACSubExp tv arrs_len
+    <*> mapM (mapOnSOACVName tv) arrs
+    <*> mapOnSOACLambda tv lam
 mapSOACM tv (Screma w arrs (ScremaForm scans reds map_lam)) =
   Screma
     <$> mapOnSOACSubExp tv w
@@ -531,6 +538,10 @@ soacType (Scatter _w _ivs lam dests) =
 soacType (Hist _ _ ops _bucket_fun) = do
   op <- ops
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
+soacType (Parm _ _ arrs_len _ lam) = do
+  ret_ty <- lambdaReturnType lam
+  let Array a _ _ = ret_ty
+  pure $ arrayOfShape (Prim a) (Shape [arrs_len])
 soacType (Screma w _arrs form) =
   scremaType w form
 
@@ -560,6 +571,8 @@ instance Aliased rep => AliasedOp (SOAC rep) where
     namesFromList $ map (\(_, _, a) -> a) as
   consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
+  consumedInOp (Parm _ _ _ _ _) =
+    mempty
 
 mapHistOp ::
   (Lambda frep -> Lambda trep) ->
@@ -583,6 +596,13 @@ instance CanBeAliased SOAC where
       arrs
       (map (mapHistOp (Alias.analyseLambda aliases)) ops)
       (Alias.analyseLambda aliases bucket_fun)
+  addOpAliases aliases (Parm masks_len masks arrs_len arrs lam) =
+    Parm 
+      masks_len
+      masks
+      arrs_len 
+      arrs 
+      (Alias.analyseLambda aliases lam)
   addOpAliases aliases (Screma w arrs (ScremaForm scans reds map_lam)) =
     Screma w arrs $
       ScremaForm
@@ -831,6 +851,45 @@ typeCheckSOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
     $ "Map function return type "
       <> prettyTuple map_lam_ts
       <> " wrong for given scan and reduction functions."
+typeCheckSOAC (Parm masks_len masks arr_len arrs lam) = do
+  -- Check the masks
+  TC.require [Prim int64] masks_len
+  TC.require [Array int64 (Shape [masks_len]) NoUniqueness] (Var masks)
+
+  -- Check the arrays 
+  TC.require [Prim int64] arr_len
+  arrs' <- mapM checkArrayArg arrs
+  
+  -- Check the lambda
+  TC.checkLambda lam arrs'
+
+  where
+    -- We have to do a bit more than for a regular SOAC :
+    -- in particular check that input arrays have rank 1.
+    checkArrayArg v = do
+      (t, als) <- TC.checkArg $ Var v
+      case t of
+        Array {} -> do
+          let argSize = arraySize 0 t
+          unless (argSize == arr_len) . TC.bad . TC.TypeError $
+            "Parm argument "
+              <> prettyText v
+              <> " has outer size "
+              <> prettyText argSize
+              <> ", but width of Parm is "
+              <> prettyText arr_len
+          let argRank = arrayRank t 
+          unless (argRank == 1) . TC.bad . TC.TypeError $ 
+            "Parm argument "
+              <> prettyText v
+              <> " has rank "
+              <> prettyText argRank
+              <> " but parm requires rank 1 arrays"
+          pure (t, als)
+        _ ->
+          TC.bad . TC.TypeError $
+            "Parm argument " <> prettyText v <> " is not an array"
+
 
 instance RephraseOp SOAC where
   rephraseInOp r (VJP lam args vec) =
@@ -856,6 +915,8 @@ instance RephraseOp SOAC where
     where
       onScan (Scan op nes) = Scan <$> rephraseLambda r op <*> pure nes
       onRed (Reduce comm op nes) = Reduce comm <$> rephraseLambda r op <*> pure nes
+  rephraseInOp r (Parm masks_len masks arrs_len arrs lam) =
+    Parm masks_len masks arrs_len arrs <$> rephraseLambda r lam
 
 instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
   opMetrics (VJP lam _ _) =
@@ -873,6 +934,8 @@ instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
       mapM_ (lambdaMetrics . scanLambda) scans
       mapM_ (lambdaMetrics . redLambda) reds
       lambdaMetrics map_lam
+  opMetrics (Parm _ _ _ _ lam) =
+    inside "Parm" $ lambdaMetrics lam
 
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
   pretty (VJP lam args vec) =
@@ -923,6 +986,15 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
                 </> pretty map_lam
             )
   pretty (Screma w arrs form) = ppScrema w arrs form
+  pretty (Parm masks_len masks arrs_len arrs lam) =
+    "parm" 
+    <> (parens . align)
+      ( pretty masks_len <> comma
+          </> pretty masks <> comma 
+          </> pretty arrs_len <> comma 
+          </> ppTuple' (map pretty arrs) <> comma
+          </> pretty lam
+      )
 
 -- | Prettyprint the given Screma.
 ppScrema ::

@@ -1189,6 +1189,43 @@ internaliseHist dim desc rf hist op ne buckets img loc = do
   letValExp' desc . I.Op $
     I.Hist w_img (buckets' ++ img') [HistOp shape_hist rf' hist' ne_shp op'] lam'
 
+internaliseParm :: 
+  String -> 
+  E.Exp -> 
+  E.Exp -> 
+  E.Exp -> 
+  InternaliseM [I.SubExp]
+internaliseParm desc masks lam arrs = do
+  masks' <- head <$> internaliseExpToVars "parm_mask" masks
+  masks_ts <- lookupType masks'
+  arrs' <- internaliseExpToVars "parm_arr" arrs
+  arr_ts <- mapM lookupType arrs'
+
+  let masks_len = arraySize 0 masks_ts
+  let arr_len = arraysSize 0 arr_ts
+
+  -- Compute the length of arrays that lambda takes as input (and output).
+  arg_size <- letSubExp "arg_size" $ BasicOp $ (I.BinOp $ I.LShr Int64) arr_len masks_len
+  -- Internalise the lambda. We can't use internaliseLambdaCoerce here.
+  let argTypes = map (buildLambdaType arg_size) arr_ts
+  (params, body, rettype) <- internaliseLambda lam argTypes
+  lam' <- mkLambda params $
+    ensureResultShape
+      (ErrorMsg [ErrorString "unexpected lambda result size"])
+      (srclocOf lam)
+      -- We manually resize the output to match the input :
+      -- otherwise the compiler uses an un-created variable in the output shape.
+      (map (buildLambdaType arg_size) rettype)
+      =<< bodyBind body
+
+  letValExp' desc . I.Op $
+    I.Parm masks_len masks' arr_len arrs' lam'
+  
+  where buildLambdaType :: SubExp -> Type -> Type
+        buildLambdaType n (I.Array pt sh u) = I.Array pt (setOuterDim sh n) u
+        buildLambdaType _ _ = error "internaliseParm"
+
+
 internaliseStreamAcc ::
   String ->
   E.Exp ->
@@ -1646,10 +1683,9 @@ isIntrinsicFunction qname args loc = do
       internaliseHist 2 desc rf dest op ne buckets img loc
     handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img loc
-    handleSOACs [masks, lam, arr] "parm" = 
-      error "handleSOACs : not implemented for 'parm' yet"
-    handleSOACs _ _ = Nothing
-
+    handleSOACs [masks, lam, arr] "parm" = Just $ \desc -> 
+      internaliseParm desc masks lam arr
+    handleSOACs _ _ = Nothing 
     handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->
       internaliseStreamAcc desc dest Nothing f bs
     handleAccs [dest, op, ne, f, bs] "hist_stream" = Just $ \desc ->
