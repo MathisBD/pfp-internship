@@ -388,7 +388,9 @@ data BasicOp
     -- Consumes the accumulator and produces a new one.
     UpdateAcc VName [SubExp] [SubExp]
   | -- | Perform a BMMC permutation on a one-dimensional array.
-    Bmmc BMatrix.BMatrix VName
+    -- The first BMatrix is the multiplication (square) matrix.
+    -- The second BMatrix is the complement (column) matrix.
+    Bmmc BMatrix.BMatrix BMatrix.BMatrix VName
   deriving (Eq, Ord, Show)
 
 -- | The input to a 'WithAcc' construct.  Comprises the index space of

@@ -47,6 +47,9 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Util
+import Futhark.Util.BMatrix qualified as B
+import qualified Control.Category as B
+
 
 simpleSOACS :: Simplify.SimpleOps SOACS
 simpleSOACS = Simplify.bindableSimpleOps simplifySOAC
@@ -124,6 +127,12 @@ simplifySOAC (Parm masks_len masks arr_len arrs lam) = do
   arrs' <- Engine.simplify arrs
   (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
   pure (Parm masks_len' masks' arr_len' arrs' lam', hoisted)
+simplifySOAC (Two nest arr_len arrs lam) = do
+  nest' <- Engine.simplify nest
+  arr_len' <- Engine.simplify arr_len
+  arrs' <- Engine.simplify arrs
+  (lam', hoisted) <- Engine.enterLoop $ Engine.simplifyLambda mempty lam
+  pure (Two nest' arr_len' arrs' lam', hoisted)
 simplifySOAC (Screma w arrs (ScremaForm scans reds map_lam)) = do
   (scans', scans_hoisted) <- fmap unzip $
     forM scans $ \(Scan lam nes) -> do
@@ -213,7 +222,8 @@ topDownRules =
     RuleOp removeDuplicateMapOutput,
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
-    RuleOp moveTransformToInput
+    RuleOp moveTransformToInput,
+    RuleOp replaceParm
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -985,3 +995,47 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
     mapOverArr _ = pure Nothing
 moveTransformToInput _ _ _ _ =
   Skip
+
+-- Replace a use of Parm with Two and Bmmc.
+replaceParm :: TopDownRuleOp (Wise SOACS)
+replaceParm vtable pat aux op
+  | Just (Parm masks_len masks arrs_len arrs lam) <- asSOAC op,
+    -- We need the array length to be known at compile time.
+    Just arrs_len_const <- compileTimeInt64 arrs_len,
+    -- We need the masks array to be known at compile time.
+    Just masks_const <- compileTimeInt64Array (Var masks) = Simplify $ auxing aux $ do
+      -- Compute the BMMC matrices we will need.
+      -- TODO : check that arrs_len_const is a power of 2 (and crash otherwise).
+      let n = log2 arrs_len_const
+          mat = parmMasksToBmmc n masks_const
+          Just mat_inv = B.inverse mat
+          compl = B.zeros (fromIntegral n) 1
+
+      -- Permute the arrays using mat.
+      arrs1 <- forM arrs $ \arr ->
+        letExp "parm_bmmc" $ BasicOp $ Bmmc mat compl arr
+
+      -- Apply the Two combinator.
+      let nest = masks_len
+      arrs2 <- letTupExp "parm_two" $ Op $ Two nest arrs_len arrs1 lam
+
+      -- Permute the arrays using mat_inv.
+      forM_ (zip (patElems pat) arrs2) $ \(p, arr) ->
+        letBind (Pat [p]) $ BasicOp $ Bmmc mat_inv compl arr
+      
+    where compileTimeInt64 (Var v) = case ST.lookupExp v vtable of 
+            Just (BasicOp (SubExp (Constant (IntValue (Int64Value val)))), _) -> Just val
+            _ -> Nothing
+          compileTimeInt64 _ = Nothing
+          compileTimeInt64Array (Var v) = case ST.lookupExp v vtable of 
+            Just (BasicOp (ArrayLit arr _), _) -> traverse compileTimeInt64 arr
+            _ -> Nothing
+          compileTimeInt64Array _ = Nothing
+replaceParm _ _ _ _ = 
+  Skip
+
+parmMasksToBmmc :: Int64 -> [Int64] -> B.BMatrix
+parmMasksToBmmc n0 masks0 = B.identity n
+  where n :: Int = fromIntegral n0
+        masks :: [Int] = map fromIntegral masks0
+

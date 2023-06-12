@@ -127,7 +127,7 @@ data SOAC rep
     -- <lambda> is the lambda that is applied to the inputs partitioned according to the masks.
     Parm SubExp VName SubExp [VName] (Lambda rep)
   | -- | @Two <nest> <input-length> <input-arrays> <lambda>
-    Two SubExp SubExp [VName]
+    Two SubExp SubExp [VName] (Lambda rep)
   | -- FIXME: this should not be here
     JVP (Lambda rep) [SubExp] [SubExp]
   | -- FIXME: this should not be here
@@ -448,6 +448,12 @@ mapSOACM tv (Parm masks_len masks arrs_len arrs lam) =
     <*> mapOnSOACSubExp tv arrs_len
     <*> mapM (mapOnSOACVName tv) arrs
     <*> mapOnSOACLambda tv lam
+mapSOACM tv (Two nest arrs_len arrs lam) =
+  Two 
+    <$> mapOnSOACSubExp tv nest 
+    <*> mapOnSOACSubExp tv arrs_len
+    <*> mapM (mapOnSOACVName tv) arrs
+    <*> mapOnSOACLambda tv lam
 mapSOACM tv (Screma w arrs (ScremaForm scans reds map_lam)) =
   Screma
     <$> mapOnSOACSubExp tv w
@@ -541,8 +547,10 @@ soacType (Hist _ _ ops _bucket_fun) = do
   op <- ops
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
 soacType (Parm _ _ arrs_len _ lam) = do
-  ret_ty <- lambdaReturnType lam
-  let Array a _ _ = ret_ty
+  Array a _ _ <- lambdaReturnType lam
+  pure $ arrayOfShape (Prim a) (Shape [arrs_len])
+soacType (Two _ arrs_len _ lam) = do
+  Array a _ _ <- lambdaReturnType lam
   pure $ arrayOfShape (Prim a) (Shape [arrs_len])
 soacType (Screma w _arrs form) =
   scremaType w form
@@ -573,8 +581,16 @@ instance Aliased rep => AliasedOp (SOAC rep) where
     namesFromList $ map (\(_, _, a) -> a) as
   consumedInOp (Hist _ _ ops _) =
     namesFromList $ concatMap histDest ops
-  consumedInOp (Parm _ _ _ _ _) =
-    mempty
+  consumedInOp (Parm _ _ _ arrs lam) =
+    mapNames consumedArray $ consumedByLambda lam
+    where
+      consumedArray v = fromMaybe v $ lookup v params_to_arrs
+      params_to_arrs = zip (map paramName $ lambdaParams lam) arrs
+  consumedInOp (Two _ _ arrs lam) = 
+    mapNames consumedArray $ consumedByLambda lam
+    where
+      consumedArray v = fromMaybe v $ lookup v params_to_arrs
+      params_to_arrs = zip (map paramName $ lambdaParams lam) arrs
 
 mapHistOp ::
   (Lambda frep -> Lambda trep) ->
@@ -604,6 +620,12 @@ instance CanBeAliased SOAC where
       masks
       arrs_len 
       arrs 
+      (Alias.analyseLambda aliases lam)
+  addOpAliases aliases (Two nest arrs_len arrs lam) =
+    Two
+      nest 
+      arrs_len
+      arrs
       (Alias.analyseLambda aliases lam)
   addOpAliases aliases (Screma w arrs (ScremaForm scans reds map_lam)) =
     Screma w arrs $
@@ -886,11 +908,48 @@ typeCheckSOAC (Parm masks_len masks arr_len arrs lam) = do
               <> prettyText v
               <> " has rank "
               <> prettyText argRank
-              <> " but parm requires rank 1 arrays"
+              <> " but Parm requires rank 1 arrays"
           pure (t, als)
         _ ->
           TC.bad . TC.TypeError $
             "Parm argument " <> prettyText v <> " is not an array"
+typeCheckSOAC (Two nest arrs_len arrs lam) = do
+  -- Check the nest
+  TC.require [Prim int64] nest
+
+  -- Check the arrays 
+  TC.require [Prim int64] arrs_len
+  arrs' <- mapM checkArrayArg arrs
+  
+  -- Check the lambda
+  TC.checkLambda lam arrs'
+
+  where
+    -- We have to do a bit more than for a regular SOAC :
+    -- in particular check that input arrays have rank 1.
+    checkArrayArg v = do
+      (t, als) <- TC.checkArg $ Var v
+      case t of
+        Array {} -> do
+          let argSize = arraySize 0 t
+          unless (argSize == arrs_len) . TC.bad . TC.TypeError $
+            "Two argument "
+              <> prettyText v
+              <> " has outer size "
+              <> prettyText argSize
+              <> ", but width of Two is "
+              <> prettyText arrs_len
+          let argRank = arrayRank t 
+          unless (argRank == 1) . TC.bad . TC.TypeError $ 
+            "Two argument "
+              <> prettyText v
+              <> " has rank "
+              <> prettyText argRank
+              <> " but Two requires rank 1 arrays"
+          pure (t, als)
+        _ ->
+          TC.bad . TC.TypeError $
+            "Two argument " <> prettyText v <> " is not an array"
 
 
 instance RephraseOp SOAC where
@@ -919,6 +978,8 @@ instance RephraseOp SOAC where
       onRed (Reduce comm op nes) = Reduce comm <$> rephraseLambda r op <*> pure nes
   rephraseInOp r (Parm masks_len masks arrs_len arrs lam) =
     Parm masks_len masks arrs_len arrs <$> rephraseLambda r lam
+  rephraseInOp r (Two nest arrs_len arrs lam) =
+    Two nest arrs_len arrs <$> rephraseLambda r lam
 
 instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
   opMetrics (VJP lam _ _) =
@@ -938,6 +999,8 @@ instance OpMetrics (Op rep) => OpMetrics (SOAC rep) where
       lambdaMetrics map_lam
   opMetrics (Parm _ _ _ _ lam) =
     inside "Parm" $ lambdaMetrics lam
+  opMetrics (Two _ _ _ lam) =
+    inside "Two" $ lambdaMetrics lam
 
 instance PrettyRep rep => PP.Pretty (SOAC rep) where
   pretty (VJP lam args vec) =
@@ -993,6 +1056,14 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
     <> (parens . align)
       ( pretty masks_len <> comma
           </> pretty masks <> comma 
+          </> pretty arrs_len <> comma 
+          </> ppTuple' (map pretty arrs) <> comma
+          </> pretty lam
+      )
+  pretty (Two nest arrs_len arrs lam) =
+    "two" 
+    <> (parens . align)
+      ( pretty nest <> comma
           </> pretty arrs_len <> comma 
           </> ppTuple' (map pretty arrs) <> comma
           </> pretty lam
