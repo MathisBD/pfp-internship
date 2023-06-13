@@ -173,7 +173,7 @@ import Data.Traversable (fmapDefault, foldMapDefault)
 import Futhark.IR.Rep
 import Futhark.IR.Syntax.Core
 import Futhark.Util.Pretty (Pretty, prettyString, prettyText)
-import Futhark.Util.BMatrix qualified as BMatrix
+import Futhark.Util.BMatrix qualified as B
 import Language.Futhark.Core
 import Prelude hiding (id, (.))
 
@@ -390,7 +390,8 @@ data BasicOp
   | -- | Perform a BMMC permutation on a one-dimensional array.
     -- The first BMatrix is the multiplication (square) matrix.
     -- The second BMatrix is the complement (column) matrix.
-    Bmmc BMatrix.BMatrix BMatrix.BMatrix VName
+    -- The result will not alias anything (similar to manifest).
+    Bmmc B.BMatrix B.BMatrix VName
   deriving (Eq, Ord, Show)
 
 -- | The input to a 'WithAcc' construct.  Comprises the index space of

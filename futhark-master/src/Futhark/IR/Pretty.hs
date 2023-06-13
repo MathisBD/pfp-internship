@@ -245,6 +245,13 @@ instance Pretty BasicOp where
           ppTuple' $ map pretty is,
           ppTuple' $ map pretty v
         ]
+  pretty (Bmmc mat compl v) =
+    "bmmc"
+      <> apply 
+        [ pretty mat
+        , pretty compl
+        , pretty v 
+        ]
 
 instance Pretty a => Pretty (ErrorMsg a) where
   pretty (ErrorMsg parts) = braces $ align $ commasep $ map p parts

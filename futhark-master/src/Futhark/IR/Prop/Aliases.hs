@@ -77,6 +77,7 @@ basicOpAliases Copy {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
+basicOpAliases Bmmc {} = [mempty]
 
 matchAliases :: [([Names], Names)] -> [Names]
 matchAliases l =

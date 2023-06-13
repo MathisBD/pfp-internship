@@ -305,6 +305,7 @@ library
       Futhark.IR.Rephrase
       Futhark.IR.RetType
       Futhark.IR.SOACS
+      Futhark.IR.SOACS.Parm
       Futhark.IR.SOACS.SOAC
       Futhark.IR.SOACS.Simplify
       Futhark.IR.SegOp
@@ -536,6 +537,7 @@ test-suite unit
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
+      Futhark.IR.SOACS.ParmTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
       Futhark.IR.Mem.IntervalTests

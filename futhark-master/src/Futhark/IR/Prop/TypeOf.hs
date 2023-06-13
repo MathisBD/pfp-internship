@@ -123,6 +123,8 @@ basicOpType Assert {} =
   pure [Prim Unit]
 basicOpType (UpdateAcc v _ _) =
   pure <$> lookupType v
+basicOpType (Bmmc _ _ v) =
+  pure <$> lookupType v
 
 -- | The type of an expression.
 expExtType ::

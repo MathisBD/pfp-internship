@@ -36,6 +36,7 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Parm
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
@@ -48,7 +49,6 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.BMatrix qualified as B
-import qualified Control.Category as B
 
 
 simpleSOACS :: Simplify.SimpleOps SOACS
@@ -1005,9 +1005,13 @@ replaceParm vtable pat aux op
     -- We need the masks array to be known at compile time.
     Just masks_const <- compileTimeInt64Array (Var masks) = Simplify $ auxing aux $ do
       -- Compute the BMMC matrices we will need.
-      -- TODO : check that arrs_len_const is a power of 2 (and crash otherwise).
-      let n = log2 arrs_len_const
-          mat = parmMasksToBmmc n masks_const
+      let n = case log2 arrs_len_const of
+                Just n0 -> n0
+                Nothing -> error $
+                  "Parm array size "
+                    <> prettyString arrs_len
+                    <> " must be a power of 2."
+          mat = parmNestMatrix (fromIntegral n) (map toInteger masks_const)
           Just mat_inv = B.inverse mat
           compl = B.zeros (fromIntegral n) 1
 
@@ -1026,16 +1030,18 @@ replaceParm vtable pat aux op
     where compileTimeInt64 (Var v) = case ST.lookupExp v vtable of 
             Just (BasicOp (SubExp (Constant (IntValue (Int64Value val)))), _) -> Just val
             _ -> Nothing
+          compileTimeInt64 (Constant (IntValue (Int64Value val))) = Just val
           compileTimeInt64 _ = Nothing
           compileTimeInt64Array (Var v) = case ST.lookupExp v vtable of 
             Just (BasicOp (ArrayLit arr _), _) -> traverse compileTimeInt64 arr
             _ -> Nothing
           compileTimeInt64Array _ = Nothing
+          -- The logarithm of a power of two.
+          log2 :: (Integral a) => a -> Maybe a
+          log2 n = go 0
+            where go i | 2^i < n   = go (i+1)
+                       | 2^i == n  = Just i
+                       | otherwise = Nothing
 replaceParm _ _ _ _ = 
   Skip
-
-parmMasksToBmmc :: Int64 -> [Int64] -> B.BMatrix
-parmMasksToBmmc n0 masks0 = B.identity n
-  where n :: Int = fromIntegral n0
-        masks :: [Int] = map fromIntegral masks0
 

@@ -58,6 +58,7 @@ import Futhark.Construct (instantiateShapes)
 import Futhark.IR.Aliases hiding (lookupAliases)
 import Futhark.Util
 import Futhark.Util.Pretty (align, docText, indent, ppTuple', pretty, (<+>), (</>))
+import Futhark.Util.BMatrix qualified as B
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -941,12 +942,13 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
 checkBasicOp (UpdateAcc acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 
-  unless (length ses == length ts) . bad . TypeError $
-    "Accumulator requires "
-      <> prettyText (length ts)
-      <> " values, but "
-      <> prettyText (length ses)
-      <> " provided."
+  unless (length ses == length ts) $ 
+    bad . TypeError $
+      "Accumulator requires "
+        <> prettyText (length ts)
+        <> " values, but "
+        <> prettyText (length ses)
+        <> " provided."
 
   unless (length is == shapeRank shape) $
     bad . TypeError $
@@ -958,7 +960,62 @@ checkBasicOp (UpdateAcc acc is ses) = do
 
   zipWithM_ require (map pure ts) ses
   consume =<< lookupAliases acc
+checkBasicOp (Bmmc mat compl v) = do
+  (sh, _) <- checkArrIdent v
 
+  unless (length (shapeDims sh) == 1) $
+    bad . TypeError $
+      "Bmmc requires a rank 1 array, but an array of shape "
+        <> prettyText sh
+        <> " was provided."
+
+  unless (B.isSquare mat) $
+    bad . TypeError $
+      "Bmmc requires a square matrix, but it has "
+        <> prettyText (B.rows mat) 
+        <> " rows and " 
+        <> prettyText (B.cols mat)
+        <> " columns." 
+  
+  unless (B.cols compl == 1) $
+    bad . TypeError $
+      "Bmmc requires the complement vector to be a column matrix, but it has "
+        <> prettyText (B.rows compl) 
+        <> " rows and " 
+        <> prettyText (B.cols compl)
+        <> " columns." 
+  
+  unless (B.rows mat == B.rows compl) $
+    bad . TypeError $
+      "Bmmc requires the matrix and complement vector to have"
+        <> " the same number of rows, but they have respectively "
+        <> prettyText (B.rows mat) 
+        <> " and "
+        <> prettyText (B.rows compl)
+        <> " rows."
+
+  unless (B.isInvertible mat) $
+    bad . TypeError $ "Bmmc requires an invertible multiply matrix."
+
+  arr_len_const <- checkInt64 $ head $ shapeDims sh
+  unless (arr_len_const == 2^(B.rows mat)) $
+    bad . TypeError $
+      "Bmmc requires the size of the matrix "
+        <> prettyText (B.rows mat) 
+        <> " to be equal to the logarithm of the input array size "
+        <> prettyText arr_len_const
+        <> "." 
+
+  where checkInt64 (Constant (IntValue (Int64Value val))) = pure val
+        checkInt64 se = do
+          t <- checkSubExp se 
+          bad . TypeError $ 
+            "Bmmc expects the expression " 
+              <> prettyText se 
+              <> " of type "
+              <> prettyText t
+              <> " to be an int64 constant." 
+          
 matchLoopResultExt ::
   Checkable rep =>
   [Param DeclType] ->

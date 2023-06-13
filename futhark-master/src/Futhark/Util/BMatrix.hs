@@ -22,6 +22,7 @@ import Control.Monad.ST ( ST )
 import Control.Monad ( when )
 import Data.Foldable ( forM_ )
 import Futhark.Util.Perm qualified as P
+import Futhark.Util.Pretty
 
 
 -- Rectangular boolean matrices. The first two arguments are the number of rows and columns.
@@ -51,9 +52,16 @@ getCol a j
   | 0 <= j && j < cols a = makeCol (rows a) $ \i -> get a i j
   | otherwise = error "BMatrix.getCol: out of bounds access"
 
+-- The Show instance prints out the entries of the matrix.
 instance Show BMatrix where
   show a = intercalate "\n" $ map prettyRow [0..rows a - 1]
     where prettyRow i = concatMap (\j -> if get a i j then "1" else ".") [0..cols a - 1]
+
+-- The pretty instance only prints out the shape of the matrix.
+instance Pretty BMatrix where
+  --pretty a = apply $ map prettyRow [0..rows a - 1]
+  --  where prettyRow i = pretty $ concatMap (\j -> if get a i j then "1" else ".") [0..cols a - 1]
+  pretty a = "bmatrix" <> apply [ pretty (rows a), pretty (cols a) ] 
 
 isSquare :: BMatrix -> Bool
 isSquare (BMatrix r c _) = r == c

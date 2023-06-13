@@ -197,6 +197,8 @@ mapExpM tv (DoLoop merge form loopbody) = do
     (params, args) = unzip merge
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
+mapExpM tv (BasicOp (Bmmc mat compl v)) =
+  BasicOp . Bmmc mat compl <$> mapOnVName tv v
 
 mapOnShape :: Monad m => Mapper frep trep m -> Shape -> m Shape
 mapOnShape tv (Shape ds) = Shape <$> mapM (mapOnSubExp tv) ds
@@ -364,6 +366,8 @@ walkExpM tv (DoLoop merge form loopbody) = do
     (params, args) = unzip merge
 walkExpM tv (Op op) =
   walkOnOp tv op
+walkExpM tv (BasicOp (Bmmc _ _ v)) =
+  walkOnVName tv v
 
 -- | A function for monadically traversing any sub-statements of the
 -- given op for some representation.
