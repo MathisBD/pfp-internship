@@ -1,7 +1,7 @@
 -- This module implements binary matrices of rank 2.
 
 module Futhark.Util.BMatrix (
-  BMatrix, rows, cols, isSquare, 
+  BMatrix, rows, cols, isSquare, Futhark.Util.BMatrix.null,
   make, makeCol, makeRow, get, getCol, getRow,
   add, mult, transpose, empty, identity, zeros, ones,
   colToInt, rowToInt, colFromInt, rowFromInt,
@@ -65,6 +65,9 @@ instance Pretty BMatrix where
 
 isSquare :: BMatrix -> Bool
 isSquare (BMatrix r c _) = r == c
+
+null :: BMatrix -> Bool
+null a = a == zeros (rows a) (cols a)
 
 make :: Int -> Int -> (Int -> Int -> Bool) -> BMatrix
 make r c f = BMatrix r c (U.force v) 
@@ -149,24 +152,24 @@ reducedRowEchelonAux r c a = go 0 0
               clearPivotCol i j
               go (i+1) (j+1) 
         -- Get the row of the pivot for index (i, j)
-        getPivotRow i j = findM (\i' -> get i' j) [i..r-1]
+        getPivotRow i j = findM (\i' -> get_ i' j) [i..r-1]
         -- Clear the column of the pivot at index (i, j)
         clearPivotCol i j = forM_ ([0..i-1] ++ [i+1..r-1]) $ \i' ->
-          do b <- get i' j 
+          do b <- get_ i' j 
              when b $ addRow i i'
         -- Swap rows i1 and i2 
         swapRows i1 i2 = forM_ [0..c-1] $ \j ->
-          do b1 <- get i1 j 
-             b2 <- get i2 j
-             set i1 j b2
-             set i2 j b1
+          do b1 <- get_ i1 j 
+             b2 <- get_ i2 j
+             set_ i1 j b2
+             set_ i2 j b1
         -- Add row i1 to row i2
         addRow i1 i2 = forM_ [0..c-1] $ \j ->
-          do b1 <- get i1 j
-             b2 <- get i2 j
-             set i2 j (b1 `xor` b2)
-        get i j = MU.read a (i * c + j)
-        set i j = MU.write a (i * c + j)
+          do b1 <- get_ i1 j
+             b2 <- get_ i2 j
+             set_ i2 j (b1 `xor` b2)
+        get_ i j = MU.read a (i * c + j)
+        set_ i j = MU.write a (i * c + j)
 
 -- | Like @if@, but where the test can be monadic.
 ifM :: Monad m => m Bool -> m a -> m a -> m a

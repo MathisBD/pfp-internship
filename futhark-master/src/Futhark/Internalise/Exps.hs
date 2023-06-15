@@ -1204,8 +1204,28 @@ internaliseParm desc masks lam arrs = do
   let masks_len = arraySize 0 masks_ts
   let arr_len = arraysSize 0 arr_ts
 
+  -- Add an assertion to check that arr_len is a power of two,
+  arr_len_check <- letSubExp "arr_len_check" =<<
+    eCmpOp (CmpEq $ IntType Int64)
+      (eBinOp (And Int64) 
+        (eSubExp arr_len)
+        (eBinOp (Sub Int64 OverflowUndef) 
+          (eSubExp arr_len) 
+          (eSubExp $ Constant $ IntValue $ Int64Value 1)))
+      (eSubExp $ Constant $ IntValue $ Int64Value 0)
+  arr_len_certs <- assert 
+    "parm_size_cert"
+    arr_len_check
+    (ErrorMsg [ 
+      ErrorString "Parm input array has size ",
+      ErrorVal (IntType Int64) arr_len,
+      ErrorString " which must be a power of 2." 
+    ])
+    (srclocOf arrs)
+
   -- Compute the length of arrays that lambda takes as input (and output).
-  arg_size <- letSubExp "arg_size" $ BasicOp $ (I.BinOp $ I.LShr Int64) arr_len masks_len
+  arg_size <- letSubExp "arg_size" $ 
+    BasicOp $ (I.BinOp $ LShr Int64) arr_len masks_len
   -- Internalise the lambda. We can't use internaliseLambdaCoerce here.
   let argTypes = map (buildLambdaType arg_size) arr_ts
   (params, body, rettype) <- internaliseLambda lam argTypes
@@ -1218,8 +1238,10 @@ internaliseParm desc masks lam arrs = do
       (map (buildLambdaType arg_size) rettype)
       =<< bodyBind body
 
-  letValExp' desc . I.Op $
-    I.Parm masks_len masks' arr_len arrs' lam'
+  -- Don't forget to certify that arr_len is a power of two.
+  certifying arr_len_certs $
+    letValExp' desc . I.Op $
+      I.Parm masks_len masks' arr_len arrs' lam'
   
   where buildLambdaType :: SubExp -> Type -> Type
         buildLambdaType n (I.Array pt sh u) = I.Array pt (setOuterDim sh n) u

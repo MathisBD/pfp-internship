@@ -479,7 +479,7 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
 (.&&.) :: Eq v => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
 TPrimExp x .&&. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogAnd x y
 
--- | Lifted logical conjunction.
+-- | Lifted logical disjunction.
 (.||.) :: Eq v => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
 TPrimExp x .||. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogOr x y
 

@@ -152,6 +152,7 @@ import Futhark.Util
 import Futhark.Util.IntegralExp
 import Futhark.Util.Loc (noLoc)
 import Futhark.Util.Pretty hiding (nest, space)
+import Futhark.Util.BMatrix qualified as B
 import Language.Futhark.Warnings
 import Prelude hiding (mod, quot)
 
@@ -1030,6 +1031,34 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
         compileStms mempty (bodyStms $ lambdaBody lam) $
           forM_ (zip arrs (bodyResult (lambdaBody lam))) $ \(arr, SubExpRes _ se) ->
             copyDWIMFix arr is' se []
+defCompileBasicOp (Pat [pe]) (Bmmc mat compl v)
+  | Shape [arr_len@(Constant (IntValue (Int64Value arr_len_val)))] <- arrayShape $ patElemType pe,
+    Just n <- log2 arr_len_val = do
+  -- Iterate over each input index in_idx.
+  sFor "in_idx" (pe64 arr_len) $ \in_idx -> do
+    -- Compute the output index corresponding to in_idx.
+    let mat_mul_compl = 
+          -- We avoid generating the XOR in the common case
+          -- where the complement vector is zero.
+          if B.null compl
+            then mat_mul
+            else fromInteger (B.colToInt compl) .^. mat_mul
+        mat_mul = 
+          foldl (.|.) 0 $ 
+            map (\i -> matMulRow i .<<. fromIntegral i) [0..fromIntegral n - 1]
+        matMulRow i =
+          1 .&. popc64 (in_idx .&. fromInteger (B.rowToInt $ B.getRow mat i))
+        popc64 te =
+          isInt64 $ Imp.FunExp "popc64" [untyped te] (IntType Int64)
+    out_idx <- dPrimV "out_idx" mat_mul_compl
+    -- Copy v[in_idx] to pe[out_idx]
+    copyDWIMFix (patElemName pe) [tvExp out_idx] (Var v) [in_idx]
+  where -- The logarithm of a power of two.
+        log2 :: (Integral a) => a -> Maybe a
+        log2 n = go 0
+          where go i | 2^i < n   = go (i+1)
+                     | 2^i == n  = Just i
+                     | otherwise = Nothing
 defCompileBasicOp pat e =
   error $
     "ImpGen.defCompileBasicOp: Invalid pattern\n  "

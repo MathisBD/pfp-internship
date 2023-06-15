@@ -1003,15 +1003,11 @@ replaceParm vtable pat aux op
     -- We need the array length to be known at compile time.
     Just arrs_len_const <- compileTimeInt64 arrs_len,
     -- We need the masks array to be known at compile time.
-    Just masks_const <- compileTimeInt64Array (Var masks) = Simplify $ auxing aux $ do
+    Just masks_const <- compileTimeInt64Array (Var masks),
+    -- The length of input arrays must be a power of two.
+    Just n <- log2 arrs_len_const = Simplify $ auxing aux $ do
       -- Compute the BMMC matrices we will need.
-      let n = case log2 arrs_len_const of
-                Just n0 -> n0
-                Nothing -> error $
-                  "Parm array size "
-                    <> prettyString arrs_len
-                    <> " must be a power of 2."
-          mat = parmNestMatrix (fromIntegral n) (map toInteger masks_const)
+      let mat = parmNestMatrix (fromIntegral n) (map toInteger masks_const)
           Just mat_inv = B.inverse mat
           compl = B.zeros (fromIntegral n) 1
 
