@@ -510,6 +510,7 @@ graphStm stm = do
       -- is thus unlikely to prevent the migration of a parent which was not
       -- already blocked by some host-only operation.
       graphHostOnly e
+    BasicOp Bmmc {} -> graphHostOnly e
     BasicOp Iota {} -> graphHostOnly e
     BasicOp Replicate {} -> graphHostOnly e
     -- END

@@ -23,6 +23,7 @@ import Futhark.CodeGen.ImpGen.GPU.SegHist
 import Futhark.CodeGen.ImpGen.GPU.SegMap
 import Futhark.CodeGen.ImpGen.GPU.SegRed
 import Futhark.CodeGen.ImpGen.GPU.SegScan
+import Futhark.CodeGen.ImpGen.GPU.Bmmc
 import Futhark.CodeGen.ImpGen.GPU.Transpose
 import Futhark.Error
 import Futhark.IR.GPUMem
@@ -155,7 +156,7 @@ segOpCompiler ::
 segOpCompiler pat (SegMap lvl space _ kbody) =
   compileSegMap pat lvl space kbody
 segOpCompiler pat (SegRed lvl@(SegThread _ _) space reds _ kbody) =
-  compileSegRed pat lvl space reds kbody
+  compileSegRed pat lvl space reds kbody 
 segOpCompiler pat (SegScan lvl@(SegThread _ _) space scans _ kbody) =
   compileSegScan pat lvl space scans kbody
 segOpCompiler pat (SegHist lvl@(SegThread _ _) space ops _ kbody) =
@@ -229,7 +230,7 @@ expCompiler :: ExpCompiler GPUMem HostEnv Imp.HostOp
 expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   x' <- toExp x
   s' <- toExp s
-
+ 
   sIota (patElemName pe) (pe64 n) x' s' et
 expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
   | Acc {} <- patElemType pe = pure ()
@@ -239,6 +240,8 @@ expCompiler (Pat [pe]) (BasicOp (Rotate rs arr))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
       sRotateKernel (patElemName pe) (map pe64 rs) arr
+expCompiler (Pat [pe]) (BasicOp (Bmmc mat compl arr)) =
+  compileBmmc pe mat compl arr
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   pure ()
