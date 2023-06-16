@@ -38,6 +38,7 @@ import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
 import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
+import Futhark.Pass.EliminateTwo
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
@@ -85,6 +86,7 @@ adPipeline =
 kernelsPipeline :: Pipeline SOACS GPU
 kernelsPipeline =
   standardPipeline
+    >>> onePass eliminateTwo
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,

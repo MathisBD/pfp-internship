@@ -1001,9 +1001,9 @@ replaceParm :: TopDownRuleOp (Wise SOACS)
 replaceParm vtable pat aux op
   | Just (Parm masks_len masks arrs_len arrs lam) <- asSOAC op,
     -- We need the array length to be known at compile time.
-    Just arrs_len_const <- compileTimeInt64 arrs_len,
+    Just arrs_len_const <- compileTimeInt64 vtable arrs_len,
     -- We need the masks array to be known at compile time.
-    Just masks_const <- compileTimeInt64Array (Var masks),
+    Just masks_const <- compileTimeInt64Array vtable (Var masks),
     -- The length of input arrays must be a power of two.
     Just n <- log2 arrs_len_const = Simplify $ auxing aux $ do
       -- Compute the BMMC matrices we will need.
@@ -1023,16 +1023,7 @@ replaceParm vtable pat aux op
       forM_ (zip (patElems pat) arrs2) $ \(p, arr) ->
         letBind (Pat [p]) $ BasicOp $ Bmmc mat_inv compl arr
       
-    where compileTimeInt64 (Var v) = case ST.lookupExp v vtable of 
-            Just (BasicOp (SubExp (Constant (IntValue (Int64Value val)))), _) -> Just val
-            _ -> Nothing
-          compileTimeInt64 (Constant (IntValue (Int64Value val))) = Just val
-          compileTimeInt64 _ = Nothing
-          compileTimeInt64Array (Var v) = case ST.lookupExp v vtable of 
-            Just (BasicOp (ArrayLit arr _), _) -> traverse compileTimeInt64 arr
-            _ -> Nothing
-          compileTimeInt64Array _ = Nothing
-          -- The logarithm of a power of two.
+    where -- The logarithm of a power of two.
           log2 :: (Integral a) => a -> Maybe a
           log2 n = go 0
             where go i | 2^i < n   = go (i+1)
@@ -1041,3 +1032,22 @@ replaceParm vtable pat aux op
 replaceParm _ _ _ _ = 
   Skip
 
+compileTimeInt64 :: ST.SymbolTable rep -> SubExp -> Maybe Int64
+compileTimeInt64 vtable (Var v) = case ST.lookupExp v vtable of 
+  Just (BasicOp (SubExp (Constant (IntValue (Int64Value val)))), _) -> Just val
+  _ -> Nothing
+compileTimeInt64 _ (Constant (IntValue (Int64Value val))) = Just val
+compileTimeInt64 _ _ = Nothing
+
+compileTimeInt64Array :: ST.SymbolTable rep -> SubExp -> Maybe [Int64]
+compileTimeInt64Array vtable (Var v) = case ST.lookupExp v vtable of 
+  Just (BasicOp (ArrayLit arr _), _) -> 
+    traverse (compileTimeInt64 vtable) arr
+  -- The simplify engine will sometimes replace array literals with replicate.
+  Just (BasicOp (Replicate (Shape [count]) x), _) -> do
+    count' <- compileTimeInt64 vtable count 
+    x' <- compileTimeInt64 vtable x
+    pure $ replicate (fromIntegral count') x'
+  _ -> Nothing
+compileTimeInt64Array _ _ = Nothing
+          
