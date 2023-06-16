@@ -367,68 +367,69 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
   -- Wrap up the above into a for-loop.
   letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
 transformSOAC _ Parm {} = 
-  error "transformSOAC: Parm should be converted to BMMCs beforehand."
-transformSOAC pat soac@(Two nest arrs_len arrs lam) = do
-  -- The chunk parameters.
-  chunk_count <- letSubExp "chunk_count" $ 
-    BasicOp $ BinOp (Shl Int64) (Constant $ IntValue $ Int64Value 1) nest 
-  chunk_size <- letSubExp "chunk_size" $
-    BasicOp $ BinOp (LShr Int64) arrs_len nest
-
-  -- The loop variables (one for each input array).
-  -- For each input array, we need a loop variable of shape [chunk_count, chunk_size].
-  let res_ts = map reshapeRes $ soacType soac
-        where reshapeRes (Array t _ u) = Array t (Shape [chunk_count, chunk_size]) u
-              reshapeRes _ = undefined
-  res_scratch <- resultArray [] res_ts 
-  res_arrs <- mapM (newIdent "res") res_ts
-  let merge = loopMerge res_arrs (map Var res_scratch)
-
-  -- The iteration index.
-  iter <- newVName "iter"
-  let iter_scope = M.insert iter (IndexName Int64) $ 
-                     scopeOfFParams $ map fst merge
-      loop_form = ForLoop iter Int64 chunk_count []
-      lam_cons = consumedByLambda $ Alias.analyseLambda mempty lam
-      lam_res = bodyResult $ lambdaBody lam
-
-  loop_body <- runBodyBuilder . localScope iter_scope $ do
-    -- Bind the lambda parameters to the chunks.
-    chunk_start <- letSubExp "chunk_start" =<<
-      eBinOp (Mul Int64 OverflowUndef) (eSubExp $ Var iter) (eSubExp chunk_size)
-    forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
-      let copyIfConsumed e
-            | paramName p `nameIn` lam_cons = do
-                BasicOp . Copy <$> letExp (baseString $ paramName p) e
-            | otherwise = pure e
-      arr_t <- lookupType arr
-      letBindNames [paramName p] =<< 
-        copyIfConsumed 
-          (BasicOp $ Index arr $ fullSlice arr_t 
-            [ DimSlice chunk_start chunk_size (Constant $ IntValue $ Int64Value 1) ])
-        
-    -- Insert the lambda statements.
-    addStms $ bodyStms $ lambdaBody lam
-
-    -- Coerce the lambda results to the right size.
-    lam_res_coerced <- forM (map resSubExp lam_res) $ \(Var v) -> 
-      letSubExp "lam_res_coerced" $ 
-        BasicOp $ Reshape ReshapeCoerce (Shape [ chunk_size ]) v
-
-    -- Copy the coerced lambda results to the results arrays.
-    loop_res <- 
-      certifying (foldMap resCerts lam_res) $ 
-        letwith (map identName res_arrs) (Var iter) lam_res_coerced
-      
-    pure $ mkBody mempty $ varsRes loop_res
-
-  -- The loop produces two-dimensional output arrays.
-  outputs_2d <- letTupExp "outputs_2d" $ DoLoop merge loop_form loop_body
-  
-  -- Flatten the two-dimensional output arrays,
-  -- and bind the flat arrays to the pattern.
-  forM_ (zip (patElems pat) outputs_2d) $ \(p, out_2d) -> 
-    letBind (Pat [p]) $ BasicOp $ Reshape ReshapeArbitrary (Shape [arrs_len]) out_2d
+  error "transformSOAC: Parm should be converted to BMMCs before this."
+transformSOAC _ Two {} =
+  error "transformSOAC: Two should be converted to Map before this."
+--  -- The chunk parameters.
+--  chunk_count <- letSubExp "chunk_count" $ 
+--    BasicOp $ BinOp (Shl Int64) (Constant $ IntValue $ Int64Value 1) nest 
+--  chunk_size <- letSubExp "chunk_size" $
+--    BasicOp $ BinOp (LShr Int64) arrs_len nest
+--
+--  -- The loop variables (one for each input array).
+--  -- For each input array, we need a loop variable of shape [chunk_count, chunk_size].
+--  let res_ts = map reshapeRes $ soacType soac
+--        where reshapeRes (Array t _ u) = Array t (Shape [chunk_count, chunk_size]) u
+--              reshapeRes _ = undefined
+--  res_scratch <- resultArray [] res_ts 
+--  res_arrs <- mapM (newIdent "res") res_ts
+--  let merge = loopMerge res_arrs (map Var res_scratch)
+--
+--  -- The iteration index.
+--  iter <- newVName "iter"
+--  let iter_scope = M.insert iter (IndexName Int64) $ 
+--                     scopeOfFParams $ map fst merge
+--      loop_form = ForLoop iter Int64 chunk_count []
+--      lam_cons = consumedByLambda $ Alias.analyseLambda mempty lam
+--      lam_res = bodyResult $ lambdaBody lam
+--
+--  loop_body <- runBodyBuilder . localScope iter_scope $ do
+--    -- Bind the lambda parameters to the chunks.
+--    chunk_start <- letSubExp "chunk_start" =<<
+--      eBinOp (Mul Int64 OverflowUndef) (eSubExp $ Var iter) (eSubExp chunk_size)
+--    forM_ (zip (lambdaParams lam) arrs) $ \(p, arr) -> do
+--      let copyIfConsumed e
+--            | paramName p `nameIn` lam_cons = do
+--                BasicOp . Copy <$> letExp (baseString $ paramName p) e
+--            | otherwise = pure e
+--      arr_t <- lookupType arr
+--      letBindNames [paramName p] =<< 
+--        copyIfConsumed 
+--          (BasicOp $ Index arr $ fullSlice arr_t 
+--            [ DimSlice chunk_start chunk_size (Constant $ IntValue $ Int64Value 1) ])
+--        
+--    -- Insert the lambda statements.
+--    addStms $ bodyStms $ lambdaBody lam
+--
+--    -- Coerce the lambda results to the right size.
+--    lam_res_coerced <- forM (map resSubExp lam_res) $ \(Var v) -> 
+--      letSubExp "lam_res_coerced" $ 
+--        BasicOp $ Reshape ReshapeCoerce (Shape [ chunk_size ]) v
+--
+--    -- Copy the coerced lambda results to the results arrays.
+--    loop_res <- 
+--      certifying (foldMap resCerts lam_res) $ 
+--        letwith (map identName res_arrs) (Var iter) lam_res_coerced
+--      
+--    pure $ mkBody mempty $ varsRes loop_res
+--
+--  -- The loop produces two-dimensional output arrays.
+--  outputs_2d <- letTupExp "outputs_2d" $ DoLoop merge loop_form loop_body
+--  
+--  -- Flatten the two-dimensional output arrays,
+--  -- and bind the flat arrays to the pattern.
+--  forM_ (zip (patElems pat) outputs_2d) $ \(p, out_2d) -> 
+--    letBind (Pat [p]) $ BasicOp $ Reshape ReshapeArbitrary (Shape [arrs_len]) out_2d
 
 
 -- | Recursively first-order-transform a lambda.

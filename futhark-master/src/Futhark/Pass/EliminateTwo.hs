@@ -1,3 +1,6 @@
+-- This pass replaces uses of Two using Reshape and Map.
+-- This is a simplification pass that does at least as much simplication 
+-- as Futhark.Pass.Simplify.simplifySOACS does. 
 module Futhark.Pass.EliminateTwo ( eliminateTwo ) where
 
 import Control.Monad
@@ -29,7 +32,7 @@ elimRule _ pat aux op
       -- Reshape the input arrays.
       arrs' <- forM arrs $ \arr -> 
         letExp "two" $ 
-          BasicOp $ Reshape ReshapeCoerce (Shape [chunk_count, chunk_size]) arr
+          BasicOp $ Reshape ReshapeArbitrary (Shape [chunk_count, chunk_size]) arr
 
       -- Map the lambda.
       arrs'' <- letTupExp "two" $ 
@@ -38,5 +41,5 @@ elimRule _ pat aux op
       -- Flatten the arrays.
       forM_ (zip (patElems pat) arrs'') $ \(pe, arr) ->
         letBind (Pat [pe]) $ 
-          BasicOp $ Reshape ReshapeCoerce (Shape [arrs_len]) arr
+          BasicOp $ Reshape ReshapeArbitrary (Shape [arrs_len]) arr
 elimRule _ _ _ _ = Skip 

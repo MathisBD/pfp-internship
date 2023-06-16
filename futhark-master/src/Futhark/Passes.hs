@@ -38,6 +38,7 @@ import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
 import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
+import Futhark.Pass.EliminateParm
 import Futhark.Pass.EliminateTwo
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
@@ -58,10 +59,11 @@ standardPipeline =
       inlineConservatively,
       simplifySOACS,
       inlineAggressively,
-      simplifySOACS,
+      eliminateParm, -- This includes simplifySOACS.
       performCSE True,
       simplifySOACS,
       fuseSOACs,
+      eliminateTwo, -- This includes simplifySOACS.
       performCSE True,
       simplifySOACS,
       removeDeadFunctions
@@ -86,7 +88,6 @@ adPipeline =
 kernelsPipeline :: Pipeline SOACS GPU
 kernelsPipeline =
   standardPipeline
-    >>> onePass eliminateTwo
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,

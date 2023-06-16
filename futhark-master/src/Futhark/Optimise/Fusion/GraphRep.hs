@@ -391,7 +391,7 @@ expInputs (Op soac) = case soac of
   Futhark.Scatter w is lam iws -> inputs is <> freeClassifications (w, lam, iws)
   Futhark.Stream w is nes lam ->
     inputs is <> freeClassifications (w, nes, lam)
-  Futhark.Parm {} -> error "expInputs: Parm should be replaced by Two at this point."
+  Futhark.Parm {} -> error "expInputs: Parm should be eliminated at this point."
   Futhark.Two nest w is lam ->
     inputs is <> freeClassifications (nest, w, lam)
   Futhark.JVP {} -> freeClassifications soac

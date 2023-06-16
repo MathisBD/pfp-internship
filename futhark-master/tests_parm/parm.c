@@ -6383,7 +6383,7 @@ void futhark_context_free(struct futhark_context* ctx) {
 
 // End of context.h
 
-static int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_6195, struct memblock xs_mem_6162);
+static int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_6161, struct memblock xs_mem_6149);
 
 static int init_constants(struct futhark_context *ctx)
 {
@@ -6466,78 +6466,52 @@ const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_
     return arr->shape;
 }
 
-static int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_6195, struct memblock xs_mem_6162)
+static int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_6161, struct memblock xs_mem_6149)
 {
     (void) ctx;
     
     int err = 0;
-    int64_t mem_6164_cached_sizze_6196 = 0;
-    unsigned char *mem_6164 = NULL;
-    int64_t mem_6166_cached_sizze_6197 = 0;
-    unsigned char *mem_6166 = NULL;
-    struct memblock mem_6184;
+    int64_t mem_6151_cached_sizze_6162 = 0;
+    unsigned char *mem_6151 = NULL;
+    struct memblock mem_6153;
     
-    mem_6184.references = NULL;
+    mem_6153.references = NULL;
     
-    struct memblock mem_out_6185;
+    struct memblock mem_out_6154;
     
-    mem_out_6185.references = NULL;
-    
-    bool empty_or_match_cert_6143;
-    
-    if (!0) {
-        set_error(ctx, msgprintf("Error: %s\n\nBacktrace:\n%s", "function arguments of wrong shape", "-> #0  unknown location\n   #1  tests_parm/parm.fut:10:5-6\n   #2  tests_parm/parm.fut:7:1-10:6\n"));
-        err = FUTHARK_PROGRAM_ERROR;
-        goto cleanup;
-    }
-    if (mem_6164_cached_sizze_6196 < (int64_t) 64) {
-        err = lexical_realloc(ctx, &mem_6164, &mem_6164_cached_sizze_6196, (int64_t) 64);
+    mem_out_6154.references = NULL;
+    if (mem_6151_cached_sizze_6162 < (int64_t) 64) {
+        err = lexical_realloc(ctx, &mem_6151, &mem_6151_cached_sizze_6162, (int64_t) 64);
         if (err != FUTHARK_SUCCESS)
             goto cleanup;
     }
-    for (int64_t in_idx_6186 = 0; in_idx_6186 < (int64_t) 16; in_idx_6186++) {
-        int64_t out_idx_6187 = (int64_t) 0 | shl64((int64_t) 1 & futrts_popc64(in_idx_6186 & (int64_t) 4), (int64_t) 0) | shl64((int64_t) 1 & futrts_popc64(in_idx_6186 & (int64_t) 8), (int64_t) 1) | shl64((int64_t) 1 & futrts_popc64(in_idx_6186 & (int64_t) 2), (int64_t) 2) | shl64((int64_t) 1 & futrts_popc64(in_idx_6186 & (int64_t) 1), (int64_t) 3);
-        int32_t tmp_6188 = ((int32_t *) xs_mem_6162.mem)[in_idx_6186];
+    for (int64_t in_idx_6155 = 0; in_idx_6155 < (int64_t) 16; in_idx_6155++) {
+        int64_t out_idx_6156 = (int64_t) 0 | shl64((int64_t) 1 & futrts_popc64(in_idx_6155 & (int64_t) 2), (int64_t) 0) | shl64((int64_t) 1 & futrts_popc64(in_idx_6155 & (int64_t) 4), (int64_t) 1) | shl64((int64_t) 1 & futrts_popc64(in_idx_6155 & (int64_t) 8), (int64_t) 2) | shl64((int64_t) 1 & futrts_popc64(in_idx_6155 & (int64_t) 1), (int64_t) 3);
+        int32_t tmp_6157 = ((int32_t *) xs_mem_6149.mem)[in_idx_6155];
         
-        ((int32_t *) mem_6164)[out_idx_6187] = tmp_6188;
+        ((int32_t *) mem_6151)[out_idx_6156] = tmp_6157;
     }
-    if (mem_6166_cached_sizze_6197 < (int64_t) 64) {
-        err = lexical_realloc(ctx, &mem_6166, &mem_6166_cached_sizze_6197, (int64_t) 64);
-        if (err != FUTHARK_SUCCESS)
-            goto cleanup;
-    }
-    for (int64_t iter_6156 = 0; iter_6156 < (int64_t) 4; iter_6156++) {
-        int64_t chunk_start_6157 = (int64_t) 4 * iter_6156;
-        int64_t slice_6161 = (int64_t) 7 + chunk_start_6157;
-        
-        for (int64_t i_6190 = 0; i_6190 < (int64_t) 4; i_6190++) {
-            int32_t tmp_6191 = ((int32_t *) mem_6164)[slice_6161 + i_6190 * (int64_t) -1];
-            
-            ((int32_t *) mem_6166)[iter_6156 * (int64_t) 4 + i_6190] = tmp_6191;
-        }
-    }
-    if (memblock_alloc(ctx, &mem_6184, (int64_t) 64, "mem_6184")) {
+    if (memblock_alloc(ctx, &mem_6153, (int64_t) 64, "mem_6153")) {
         err = 1;
         goto cleanup;
     }
-    for (int64_t in_idx_6192 = 0; in_idx_6192 < (int64_t) 16; in_idx_6192++) {
-        int64_t out_idx_6193 = (int64_t) 0 | shl64((int64_t) 1 & futrts_popc64(in_idx_6192 & (int64_t) 8), (int64_t) 0) | shl64((int64_t) 1 & futrts_popc64(in_idx_6192 & (int64_t) 4), (int64_t) 1) | shl64((int64_t) 1 & futrts_popc64(in_idx_6192 & (int64_t) 1), (int64_t) 2) | shl64((int64_t) 1 & futrts_popc64(in_idx_6192 & (int64_t) 2), (int64_t) 3);
-        int32_t tmp_6194 = ((int32_t *) mem_6166)[in_idx_6192];
+    for (int64_t in_idx_6158 = 0; in_idx_6158 < (int64_t) 16; in_idx_6158++) {
+        int64_t out_idx_6159 = (int64_t) 0 | shl64((int64_t) 1 & futrts_popc64(in_idx_6158 & (int64_t) 8), (int64_t) 0) | shl64((int64_t) 1 & futrts_popc64(in_idx_6158 & (int64_t) 1), (int64_t) 1) | shl64((int64_t) 1 & futrts_popc64(in_idx_6158 & (int64_t) 2), (int64_t) 2) | shl64((int64_t) 1 & futrts_popc64(in_idx_6158 & (int64_t) 4), (int64_t) 3);
+        int32_t tmp_6160 = ((int32_t *) mem_6151)[(int64_t) 7 + (squot64(in_idx_6158, (int64_t) 8) * (int64_t) 8 + (in_idx_6158 - squot64(in_idx_6158, (int64_t) 8) * (int64_t) 8) * (int64_t) -1)];
         
-        ((int32_t *) mem_6184.mem)[out_idx_6193] = tmp_6194;
+        ((int32_t *) mem_6153.mem)[out_idx_6159] = tmp_6160;
     }
-    if (memblock_set(ctx, &mem_out_6185, &mem_6184, "mem_6184") != 0)
+    if (memblock_set(ctx, &mem_out_6154, &mem_6153, "mem_6153") != 0)
         return 1;
-    if (memblock_set(ctx, &*mem_out_p_6195, &mem_out_6185, "mem_out_6185") != 0)
+    if (memblock_set(ctx, &*mem_out_p_6161, &mem_out_6154, "mem_out_6154") != 0)
         return 1;
     
   cleanup:
     {
-        free(mem_6164);
-        free(mem_6166);
-        if (memblock_unref(ctx, &mem_6184, "mem_6184") != 0)
+        free(mem_6151);
+        if (memblock_unref(ctx, &mem_6153, "mem_6153") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_6185, "mem_out_6185") != 0)
+        if (memblock_unref(ctx, &mem_out_6154, "mem_out_6154") != 0)
             return 1;
     }
     return err;
@@ -6549,23 +6523,23 @@ int futhark_entry_main(struct futhark_context *ctx, struct futhark_i32_1d **out0
     
     lock_lock(&ctx->lock);
     
-    struct memblock mem_out_6185;
+    struct memblock mem_out_6154;
     
-    mem_out_6185.references = NULL;
+    mem_out_6154.references = NULL;
     
-    struct memblock xs_mem_6162;
+    struct memblock xs_mem_6149;
     
-    xs_mem_6162.references = NULL;
-    xs_mem_6162 = in0->mem;
+    xs_mem_6149.references = NULL;
+    xs_mem_6149 = in0->mem;
     if (!((int64_t) 16 == in0->shape[0])) {
         ret = 1;
         set_error(ctx, msgprintf("Error: entry point arguments have invalid sizes.\n"));
     }
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &mem_out_6185, xs_mem_6162);
+        ret = futrts_entry_main(ctx, &mem_out_6154, xs_mem_6149);
         if (ret == 0) {
             assert((*out0 = (struct futhark_i32_1d *) malloc(sizeof(struct futhark_i32_1d))) != NULL);
-            (*out0)->mem = mem_out_6185;
+            (*out0)->mem = mem_out_6154;
             (*out0)->shape[0] = (int64_t) 16;
         }
     }
