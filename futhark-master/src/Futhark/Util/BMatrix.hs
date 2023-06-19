@@ -6,7 +6,7 @@ module Futhark.Util.BMatrix (
   add, mult, transpose, empty, identity, zeros, ones,
   colToInt, rowToInt, colFromInt, rowFromInt,
   vstack, hstack, vsplit, hsplit,
-  fromPerm,
+  fromPerm, isPerm,
   reducedRowEchelon, inverse, isInvertible, unsafeInverse,
   blockDiag, rank,
   transformInt,
@@ -188,6 +188,14 @@ fromPerm :: P.Perm -> BMatrix
 fromPerm perm = make n n $ \i j -> i == P.apply perm j
   where n = P.size perm
 
+-- Is this a permutation matrix ?
+isPerm :: BMatrix -> Maybe P.Perm
+isPerm mat 
+  | isInvertible mat && all (\j -> length (imgs j) == 1) [0..n-1] = 
+      Just $ P.make n $ \j -> head (imgs j) 
+  | otherwise = Nothing
+  where imgs j = filter (\i -> get mat i j) [0..n-1]
+        n = rows mat
 
 -- Compute the inverse of a matrix.
 inverse :: BMatrix -> Maybe BMatrix 

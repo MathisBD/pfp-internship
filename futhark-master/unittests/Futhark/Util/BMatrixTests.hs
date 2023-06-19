@@ -5,6 +5,7 @@ import Test.Tasty.QuickCheck
 import Futhark.Util.Perm qualified as P
 import Futhark.Util.BMatrix qualified as B
 import Data.List ( sort )
+import Data.Maybe
 import Control.Monad ( liftM2 )
 
 
@@ -39,6 +40,8 @@ tests = testGroup "Binary Matrix Tests"
   , testProperty "from-perm-id" fromPermIdProp
   , testProperty "from-perm-inv" fromPermInvProp
   , testProperty "inv-from-perm" invFromPermProp
+  , testProperty "from-perm-is-perm" fromPermIsPermProp
+  , testProperty "is-perm" isPermProp
   , testProperty "decomposeULP" decomposeULPProp
   , testProperty "decomposeLUP" decomposeLUPProp
   ]
@@ -202,6 +205,13 @@ fromPermInvProp perm = property $ B.isInvertible (B.fromPerm perm)
 
 invFromPermProp :: P.Perm -> Property
 invFromPermProp perm = B.inverse (B.fromPerm perm) === Just (B.fromPerm (P.inverse perm))
+
+fromPermIsPermProp :: P.Perm -> Property
+fromPermIsPermProp perm = property $ B.isPerm (B.fromPerm perm) == Just perm
+
+isPermProp :: B.BMatrix -> Property 
+isPermProp a = isJust (B.isPerm a) ==> a == B.fromPerm perm
+  where Just perm = B.isPerm a
 
 invProp :: B.BMatrix -> Property
 invProp a = 

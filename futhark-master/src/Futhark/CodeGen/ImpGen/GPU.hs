@@ -241,7 +241,7 @@ expCompiler (Pat [pe]) (BasicOp (Rotate rs arr))
   | otherwise =
       sRotateKernel (patElemName pe) (map pe64 rs) arr
 expCompiler (Pat [pe]) (BasicOp (Bmmc mat compl arr)) =
-  compileBmmc pe mat compl arr
+  compileBmmc (patElemName pe) mat compl arr
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   pure ()
