@@ -42,6 +42,7 @@ import Futhark.Pass.EliminateParm
 import Futhark.Pass.EliminateTwo
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
+import Futhark.Pass.FactorizeBmmcs
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
@@ -90,7 +91,7 @@ kernelsPipeline =
   standardPipeline
     >>> onePass extractKernels
     >>> passes
-      [ simplifyGPU,
+      [ factorizeBmmcs, -- This includes simplifyGPU.
         optimiseGenRed,
         simplifyGPU,
         tileLoops,

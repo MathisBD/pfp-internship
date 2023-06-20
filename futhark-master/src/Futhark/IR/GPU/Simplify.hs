@@ -8,6 +8,8 @@ module Futhark.IR.GPU.Simplify
 
     -- * Building blocks
     simplifyKernelOp,
+    simpleGPU,
+    kernelRules,
   )
 where
 
