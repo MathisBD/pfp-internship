@@ -377,8 +377,6 @@ library
       Futhark.Optimise.Unstream
       Futhark.Pass
       Futhark.Pass.AD
-      Futhark.Pass.EliminateParm
-      Futhark.Pass.EliminateTwo
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.GPU
@@ -395,11 +393,14 @@ library
       Futhark.Pass.ExtractKernels.StreamKernel
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
-      Futhark.Pass.FactorizeBmmcs
       Futhark.Pass.FirstOrderTransform
       Futhark.Pass.KernelBabysitting
       Futhark.Pass.LiftAllocations
       Futhark.Pass.LowerAllocations
+      Futhark.Pass.Parm.EliminateParm
+      Futhark.Pass.Parm.EliminateTwo
+      Futhark.Pass.Parm.FactorizeBmmcs
+      Futhark.Pass.Parm.LinearizeBmmcInputs
       Futhark.Pass.Simplify
       Futhark.Passes
       Futhark.Pipeline

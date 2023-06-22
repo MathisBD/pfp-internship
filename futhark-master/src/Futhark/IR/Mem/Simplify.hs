@@ -5,6 +5,9 @@ module Futhark.IR.Mem.Simplify
     simplifyStmsGeneric,
     simpleGeneric,
     SimplifyMemory,
+
+    -- Building blocks.
+    blockers
   )
 where
 

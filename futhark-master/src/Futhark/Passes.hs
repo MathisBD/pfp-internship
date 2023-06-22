@@ -38,11 +38,12 @@ import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
 import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
-import Futhark.Pass.EliminateParm
-import Futhark.Pass.EliminateTwo
+import Futhark.Pass.Parm.EliminateParm
+import Futhark.Pass.Parm.EliminateTwo
+import Futhark.Pass.Parm.FactorizeBmmcs
+import Futhark.Pass.Parm.LinearizeBmmcInputs
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
-import Futhark.Pass.FactorizeBmmcs
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
@@ -170,6 +171,8 @@ gpuPipeline =
         MemoryBlockMerging.optimise,
         simplifyGPUMem,
         expandAllocations,
+        simplifyGPUMem,
+        linearizeBmmcInputs,
         simplifyGPUMem
       ]
 

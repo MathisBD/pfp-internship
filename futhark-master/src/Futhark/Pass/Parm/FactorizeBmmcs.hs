@@ -1,6 +1,6 @@
 -- This pass factorizes every BMMC into a product of two tiled BMMCs.
 -- These are tiled regardless of the tile bit count we actually use later on (in ImpGen).
-module Futhark.Pass.FactorizeBmmcs ( factorizeBmmcs ) where
+module Futhark.Pass.Parm.FactorizeBmmcs ( factorizeBmmcs ) where
 
 import Data.List ( sort )
 import Futhark.IR.GPU

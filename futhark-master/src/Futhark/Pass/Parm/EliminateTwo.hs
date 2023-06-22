@@ -1,7 +1,7 @@
 -- This pass replaces uses of Two using Reshape and Map.
 -- This is a simplification pass that does at least as much simplication 
 -- as Futhark.Pass.Simplify.simplifySOACS does. 
-module Futhark.Pass.EliminateTwo ( eliminateTwo ) where
+module Futhark.Pass.Parm.EliminateTwo ( eliminateTwo ) where
 
 import Control.Monad
 import Futhark.IR.SOACS

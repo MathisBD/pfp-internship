@@ -3,7 +3,7 @@
 -- as Futhark.Pass.Simplify.simplifySOACS does. 
 -- There is no guarantee that all occurences of Parm can be replaced :
 -- if there are some left the compiler will raise an error later on.
-module Futhark.Pass.EliminateParm ( eliminateParm ) where
+module Futhark.Pass.Parm.EliminateParm ( eliminateParm ) where
 
 import Control.Monad
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -42,15 +42,15 @@ elimRule vtable pat aux op
           compl = B.zeros (fromIntegral n) 1
 
       -- Permute the arrays using mat.
-      arrs1 <- forM arrs $ \arr ->
+      arrs1 <- forM arrs $ \arr -> do 
         letExp "parm_bmmc" $ BasicOp $ Bmmc mat compl arr
-
+         
       -- Apply the Two combinator.
       let nest = masks_len
       arrs2 <- letTupExp "parm_two" $ Op $ Two nest arrs_len arrs1 lam
 
       -- Permute the arrays using mat_inv.
-      forM_ (zip (patElems pat) arrs2) $ \(p, arr) ->
+      forM_ (zip (patElems pat) arrs2) $ \(p, arr) -> do
         letBind (Pat [p]) $ BasicOp $ Bmmc mat_inv compl arr
       
     where -- The logarithm of a power of two.
