@@ -25,7 +25,7 @@ factorizeBmmcs =
 
 elimRule :: TopDownRuleBasicOp (Wise GPU)
 elimRule _ (Pat [pe]) aux (Bmmc mat compl v) 
-  | not (isPseudoTriangular mat) = Simplify $ auxing aux $ do
+  | not (isPseudoTriangular mat) && n > nTile = Simplify $ auxing aux $ do
       v' <- letExp "bmmc_tmp" $
         BasicOp $ Bmmc tiled1 (B.zeros n 1) v
       letBind (Pat [pe]) $
@@ -35,6 +35,7 @@ elimRule _ (Pat [pe]) aux (Bmmc mat compl v)
           tiled1 = rev `B.mult` lower `B.mult` B.fromPerm perm
           tiled2 = upper `B.mult` rev 
           n = B.rows mat
+          nTile = 5 -- We only factorize matrices for which n > nTile.
 elimRule _ _ _ _ = Skip
 
 -- Can we permute the columns of this (square) matrix so that it is upper triangular ?

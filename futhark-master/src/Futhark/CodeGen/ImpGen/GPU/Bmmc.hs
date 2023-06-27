@@ -2,10 +2,11 @@
 
 module Futhark.CodeGen.ImpGen.GPU.Bmmc ( compileBmmc ) where
 
+import Debug.Trace ( trace ) 
 import Control.Monad
 import Control.Monad.Reader
 import Data.Bits qualified as Bits
-import Data.List ( sort, sortOn )
+import Data.List ( sort, sortOn, partition )
 import Data.Function ( (&) )
 import Futhark.IR.Prop.Types
 import Futhark.MonadFreshNames
@@ -87,12 +88,9 @@ compileBmmc dest mat compl src = do
 
   where ixfunOffset ixfun t
           | Just ofs <- IxFun.linearWithOffset ixfun (primByteSize t) = ofs `IntExp.quot` primByteSize t
-          -- TODO : handle this better (copy the array to the right layout if needed).
           | otherwise = error $ 
               "compileBmmc: expected a linear array in memory."
-              <> "\nsrc: " <> prettyString src
-              <> "\ndest: " <> prettyString dest
-        
+              
 makeEnv :: Int -> Int -> B.BMatrix -> B.BMatrix -> BmmcEnv
 makeEnv nTile nIter mat compl =
   BmmcEnv 
@@ -105,9 +103,9 @@ makeEnv nTile nIter mat compl =
     }
   where kind
           | Just perm <- B.isPerm mat, 
-            nTile + tally (>= nTile) cols + nIter <= n = BmmcBpc perm compl
-          | nTile + tally (>= nTile) cols <= n         = BmmcTiled mat compl
-          | otherwise                                  = BmmcSmall mat compl
+            nTile + tally (>= nTile) cols + nIter <= n = trace ("bpc:\n" <> show mat <> "\n")   $ BmmcBpc perm compl
+          | nTile + tally (>= nTile) cols <= n         = trace ("tiled:\n" <> show mat <> "\n") $ BmmcTiled mat compl
+          | otherwise                                  = trace "small" $ BmmcSmall mat compl
         cols
           | Just cols0 <- isTiled nTile mat = cols0
           | otherwise = error $ "makeEnv: the Bmmc matrix must be tiled.\n" <> show mat
@@ -136,10 +134,10 @@ bmmcKernel name dest_mem dest_ofs src_mem src_ofs t = do
   num_groups <- asks $ \env -> [ ve64 $ 2^nBlock env ] 
   group_size <- asks $ \env -> 
     case kind env of
-      BmmcSmall _ _ -> [ ve64 $ 2^nBits env]
-      BmmcBpc _ _ -> [2^nTile env, 2^nTO env]
-      BmmcTiled _ _ -> [2^nTile env, 2^nTO env]
-    
+      BmmcSmall _ _ -> [ ve64 $ 2^(nBits env)]
+      BmmcBpc _ _ -> [2^(nTile env + nTO env)]
+      BmmcTiled _ _ -> [2^(nTile env + nTO env)]
+  
   body <- bmmcKernelCode dest_mem dest_ofs src_mem src_ofs t
 
   pure $ Kernel 
@@ -178,45 +176,143 @@ bmmcKernelCode dest_mem dest_ofs src_mem src_ofs t = do
                       -- does not like zero-size local memory.
       BmmcBpc {} -> fromInteger $ 2^(nTile env + nTO env + nIter env) * primByteSize t
       BmmcTiled {} -> fromInteger $ 2^(nTile env + nTO env) * primByteSize t
-    
+  
+  -- Two masks used for address computations in the bank-conflict free versions.
+  tile_mask_low <- asks $ \env -> 
+    2^(nTile env) - 1 :: TExp Int64  
+  tile_mask_high <- asks $ \env -> 
+    (2^(nTO env) - 1) * 2^(nTile env) :: TExp Int64
+  
   asks kind >>= \case  
-    -- This version is uncoalesced.
+    -- This version is uncoalesced and has only one thread group.
     BmmcSmall mat compl -> pure $ mkBmmc tile_bytes $ mconcat
       [ dec in_idx $ le64 get_local_id_0
       , dec out_idx $ ve64 0
+      , DeclareScalar val Nonvolatile t
       , genMatMul mat compl out_idx in_idx 
       , Read val src_mem (elements $ unCount src_ofs + le64 in_idx) t (Space "global") Nonvolatile   
       , Write dest_mem (elements $ unCount dest_ofs + le64 out_idx) t (Space "global") Nonvolatile (var val t)
       ]
     -- This version uses tiling, iterations and has no bank conflicts.
-    BmmcBpc perm compl -> error "bpc: not implemented yet"
-    -- This version uses tiling and has no bank conflicts, but does not use iterations.
-    -- On average this version is as fast as the BPC version, but it might be slower for edge cases.
-    BmmcTiled mat compl -> do
-      in_idx_copies       <- genInAddrBasic       in_idx       warp_id thread_id block_id
-      in_tile_idx_copies  <- genInBlockAddrBasic  in_tile_idx  warp_id thread_id
-      out_idx_copies      <- genOutAddrBasic      out_idx_tmp  warp_id thread_id block_id
-      out_tile_idx_copies <- genOutBlockAddrBasic out_tile_idx warp_id thread_id
+    BmmcBpc perm compl -> do
+      env <- ask
+      in_idx_copies       <- genInAddrIter   in_idx       warp_id      thread_id block_id iter
+      in_tile_idx_copies  <- genInBlockAddr  in_tile_idx  warp_id      thread_id
+      in_shift_copies     <- genShift        in_shift     in_tile_idx
+      out_idx_copies      <- genOutAddrIter  out_idx      warp_id      thread_id block_id iter
+      out_tile_idx_copies <- genOutBlockAddr out_tile_idx warp_id      thread_id
+      out_shift_copies    <- genShift        out_shift    out_tile_idx
+      
+      let (inner_in_idx_copies, outer_in_idx_copies) = 
+            partition (\(_, _, v_in, _, _) -> v_in == iter) 
+              in_idx_copies 
+          in_idx_mask = concatMap (\(_, i_out, _, _, offsets) -> map (+ i_out) offsets) inner_in_idx_copies          
+                      & bitIdxsToInteger
+                      & fromInteger 
+                      & Bits.complement
+                      & ve64
+          (inner_out_idx_copies, outer_out_idx_copies) = 
+            partition (\(_, _, v_in, _, _) -> v_in == iter) $
+              map (\(v_out, i_out, v_in, i_in, offsets) -> (v_out, P.apply perm i_out, v_in, i_in, offsets)) 
+                out_idx_copies
+          out_idx_mask = concatMap (\(_, i_out, _, _, offsets) -> map (+ i_out) offsets) inner_out_idx_copies          
+                       & bitIdxsToInteger
+                       & fromInteger 
+                       & Bits.complement
+                       & ve64
+          
       pure $ mkBmmc tile_bytes $ mconcat
         [ dec block_id $ le64 get_group_id_0
-        , dec warp_id $ le64 get_local_id_1
-        , dec thread_id $ le64 get_local_id_0 
+        , dec warp_id $ le64 get_local_id_0 .>>. fromIntegral (nTile env)
+        , dec thread_id $ le64 get_local_id_0 .&. (2^(nTile env)-1)
+        , DeclareScalar val Nonvolatile t
         -- Read in the tile.
         , dec in_idx $ ve64 0
         , dec in_tile_idx $ ve64 0
-        , genBitCopies in_idx_copies
+        , dec in_shift $ ve64 0
         , genBitCopies in_tile_idx_copies
-        , Read val src_mem (elements $ unCount src_ofs + le64 in_idx) t (Space "global") Nonvolatile   
-        , Write tile (elements $ le64 in_tile_idx) t (Space "local") Nonvolatile (var val t)     
+        , genBitCopies in_shift_copies
+        , genBitCopies outer_in_idx_copies
+        , For iter (ValueExp $ IntValue $ Int64Value $ 2^(nIter env)) $ mconcat 
+          [ SetScalar in_idx $ untyped $ le64 in_idx .&. in_idx_mask
+          , genBitCopies inner_in_idx_copies
+          , Read val src_mem 
+              (elements $ unCount src_ofs + le64 in_idx) 
+              t (Space "global") Nonvolatile   
+          , Write tile 
+              (elements $ 
+                (le64 iter .<<. fromIntegral (nTile env + nTO env)) +
+                (le64 in_tile_idx .&. tile_mask_high) +
+                ((le64 in_tile_idx + le64 in_shift) .&. tile_mask_low)) 
+              t (Space "local") Nonvolatile (var val t)     
+          ]
         -- Synchronize.
         , Op $ Barrier FenceLocal
         -- Write out the tile.
         , dec out_idx $ ve64 0
         , dec out_tile_idx $ ve64 0
+        , dec out_shift $ ve64 0
+        , genBitCopies out_tile_idx_copies
+        , genBitCopies out_shift_copies
+        , genBitCopies outer_out_idx_copies
+        , For iter (ValueExp $ IntValue $ Int64Value $ 2^(nIter env)) $ mconcat 
+          [ SetScalar out_idx $ untyped $ le64 out_idx .&. out_idx_mask
+          , genBitCopies inner_out_idx_copies
+          , Read val tile 
+              (elements $ 
+                (le64 iter .<<. fromIntegral (nTile env + nTO env)) +
+                (le64 out_tile_idx .&. tile_mask_high) +
+                ((le64 out_tile_idx + le64 out_shift) .&. tile_mask_low)) 
+              t (Space "local") Nonvolatile
+          , Write dest_mem 
+              (elements $ unCount dest_ofs + (le64 out_idx .^. fromInteger (B.colToInt compl))) 
+              t (Space "global") Nonvolatile (var val t)
+          ]
+        ]
+    -- This version uses tiling and has no bank conflicts, but does not use iterations.
+    -- On average this version is as fast as the BPC version, but it might be slower for edge cases.
+    BmmcTiled mat compl -> do
+      env <- ask
+      in_idx_copies       <- genInAddrBasic  in_idx       warp_id      thread_id block_id
+      in_tile_idx_copies  <- genInBlockAddr  in_tile_idx  warp_id      thread_id
+      in_shift_copies     <- genShift        in_shift     in_tile_idx
+      out_idx_copies      <- genOutAddrBasic out_idx_tmp  warp_id      thread_id block_id
+      out_tile_idx_copies <- genOutBlockAddr out_tile_idx warp_id      thread_id
+      out_shift_copies    <- genShift        out_shift    out_tile_idx
+      pure $ mkBmmc tile_bytes $ mconcat
+        [ dec block_id $ le64 get_group_id_0
+        , dec warp_id $ le64 get_local_id_0 .>>. fromIntegral (nTile env)
+        , dec thread_id $ le64 get_local_id_0 .&. (2^(nTile env)-1)
+        , DeclareScalar val Nonvolatile t
+        -- Read in the tile.
+        , dec in_idx $ ve64 0
+        , dec in_tile_idx $ ve64 0
+        , dec in_shift $ ve64 0
+        , genBitCopies in_idx_copies
+        , genBitCopies in_tile_idx_copies
+        , genBitCopies in_shift_copies
+        , Read val src_mem (elements $ unCount src_ofs + le64 in_idx) t (Space "global") Nonvolatile   
+        , Write tile 
+            (elements $ 
+              (le64 in_tile_idx .&. tile_mask_high) +
+              ((le64 in_tile_idx + le64 in_shift) .&. tile_mask_low)) 
+            t (Space "local") Nonvolatile (var val t)     
+        -- Synchronize.
+        , Op $ Barrier FenceLocal
+        -- Write out the tile.
+        , dec out_idx $ ve64 0
+        , dec out_idx_tmp $ ve64 0
+        , dec out_tile_idx $ ve64 0
+        , dec out_shift $ ve64 0
         , genBitCopies out_idx_copies
         , genBitCopies out_tile_idx_copies
+        , genBitCopies out_shift_copies
         , genMatMul mat compl out_idx out_idx_tmp 
-        , Read val tile (elements $ le64 out_tile_idx) t (Space "local") Nonvolatile
+        , Read val tile 
+            (elements $ 
+              (le64 out_tile_idx .&. tile_mask_high) +
+              ((le64 out_tile_idx + le64 out_shift) .&. tile_mask_low)) 
+            t (Space "local") Nonvolatile
         , Write dest_mem (elements $ unCount dest_ofs + le64 out_idx) t (Space "global") Nonvolatile (var val t)
         ]
   where 
@@ -238,6 +334,10 @@ bmmcKernelCode dest_mem dest_ofs src_mem src_ofs t = do
         , Op $ GetLocalId get_local_id_1 1
         , DeclareScalar get_group_id_0 Nonvolatile int32
         , Op $ GetGroupId get_group_id_0 0
+        , DeclareScalar get_local_size_0 Nonvolatile int32
+        , Op $ GetLocalSize get_local_size_0 0
+        , DeclareScalar get_global_id_0 Nonvolatile int32
+        , SetScalar get_global_id_0 $ untyped $ le32 get_group_id_0 * le32 get_local_size_0 + le32 get_local_id_0
         ]
 
     -- Be extremely careful when editing this list to ensure that
@@ -262,6 +362,8 @@ bmmcKernelCode dest_mem dest_ofs src_mem src_ofs t = do
      , get_local_id_0
      , get_local_id_1
      , get_group_id_0
+     , get_global_id_0
+     , get_local_size_0
      ] =
         zipWith (flip VName) [30 ..] $
           map
@@ -282,6 +384,8 @@ bmmcKernelCode dest_mem dest_ofs src_mem src_ofs t = do
             , "get_local_id_0"
             , "get_local_id_1"
             , "get_group_id_0"
+            , "get_global_id_0"
+            , "get_local_size_0"
             ]
 
 -- Data to generate code that copies one or several bits
@@ -310,7 +414,9 @@ mergeBitCopies xs = maybe xs mergeBitCopies (msum $ map (tryMerge xs) ijs)
                 x = (v_out1, out_idx1, v_in1, in_idx1, offsets1 ++ map (+ delta_in) offsets2)
 
 genBitCopies :: [BitCopy] -> KernelCode 
-genBitCopies = mconcat . map genBitCopy . mergeBitCopies
+genBitCopies = 
+  mconcat . map genBitCopy
+  --mconcat . map genBitCopy . mergeBitCopies
 
 genBitCopy :: BitCopy -> KernelCode
 genBitCopy (v_out, out_idx, v_in, in_idx, offsets) = 
@@ -389,8 +495,8 @@ genOutAddrIter v_out_addr v_i v_j v_g v_iter = asks $ go 0 0 0 0 0
               (v_out_addr, addr_idx, v_g, g_idx, [0]) : go (addr_idx + 1) i_idx j_idx (g_idx + 1) iter_idx env
 
 
-genInBlockAddrBasic :: VName -> VName -> VName -> BmmcM [BitCopy]
-genInBlockAddrBasic v_iblock_addr v_i v_j = asks $ go 0 0 0
+genInBlockAddr :: VName -> VName -> VName -> BmmcM [BitCopy]
+genInBlockAddr v_iblock_addr v_i v_j = asks $ go 0 0 0
   where go addr_idx i_idx j_idx env
           | addr_idx >= nTile env + nTO env = []
           -- Take bit from j
@@ -400,8 +506,8 @@ genInBlockAddrBasic v_iblock_addr v_i v_j = asks $ go 0 0 0
           | otherwise = 
               (v_iblock_addr, addr_idx, v_i, i_idx, [0]) : go (addr_idx + 1) (i_idx+1) j_idx env
 
-genOutBlockAddrBasic :: VName -> VName -> VName -> BmmcM [BitCopy]
-genOutBlockAddrBasic v_oblock_addr v_i v_j = asks $ go 0 0 0
+genOutBlockAddr :: VName -> VName -> VName -> BmmcM [BitCopy]
+genOutBlockAddr v_oblock_addr v_i v_j = asks $ go 0 0 0
   where go addr_idx i_idx j_idx env
           | addr_idx >= nTile env + nTO env = []
           -- Take bit from j
