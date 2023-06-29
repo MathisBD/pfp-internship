@@ -47,6 +47,7 @@ import Futhark.Pass
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Util
+import Futhark.Util.BMatrix qualified as B
 
 
 simpleSOACS :: Simplify.SimpleOps SOACS
@@ -220,7 +221,10 @@ topDownRules =
     RuleOp removeDuplicateMapOutput,
     RuleOp fuseConcatScatter,
     RuleOp simplifyMapIota,
-    RuleOp moveTransformToInput
+    RuleOp moveTransformToInput,
+    RuleBasicOp fuseBmmcs,
+    RuleBasicOp removeIdentityBmmc,
+    RuleBasicOp simplifyBmmcReplicate
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -992,3 +996,28 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
     mapOverArr _ = pure Nothing
 moveTransformToInput _ _ _ _ =
   Skip
+
+removeIdentityBmmc :: TopDownRuleBasicOp (Wise SOACS)
+removeIdentityBmmc _ pat aux (Bmmc mat compl v) 
+  | mat == B.identity (B.rows mat) && B.null compl = 
+    Simplify $ auxing aux $ do 
+      letBind pat $ BasicOp $ SubExp $ Var v
+removeIdentityBmmc _ _ _ _ = Skip
+
+fuseBmmcs :: TopDownRuleBasicOp (Wise SOACS)
+fuseBmmcs vtable pat aux (Bmmc mat2 compl2 v2)
+  | Just (e, certs) <- ST.lookupExp v2 vtable,
+    BasicOp (Bmmc mat1 compl1 v1) <- removeExpWisdom e = 
+    Simplify $ certifying certs $ auxing aux $ do
+      letBind pat $ BasicOp $ 
+        Bmmc (mat2 `B.mult` mat1) (mat2 `B.mult` compl1 `B.add` compl2) v1
+fuseBmmcs _ _ _ _ = Skip
+
+simplifyBmmcReplicate :: TopDownRuleBasicOp (Wise SOACS)
+simplifyBmmcReplicate vtable pat aux (Bmmc _ _ v)
+  | Just (e, certs) <- ST.lookupExp v vtable,
+    BasicOp (Replicate sh x) <- removeExpWisdom e,
+    shapeRank sh == 1 =
+    Simplify $ certifying certs $ auxing aux $ do
+      letBind pat $ BasicOp $ Replicate sh x
+simplifyBmmcReplicate _ _ _ _ = Skip

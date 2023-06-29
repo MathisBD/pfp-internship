@@ -36,6 +36,8 @@ module Futhark.IR.SOACS.SOAC
     ppHist,
     ppStream,
     ppScatter,
+    ppParm,
+    ppTwo,
     groupScatterResults,
     groupScatterResults',
     splitScatterResults,
@@ -1051,8 +1053,14 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
                 </> pretty map_lam
             )
   pretty (Screma w arrs form) = ppScrema w arrs form
-  pretty (Parm masks_len masks arrs_len arrs lam) =
-    "parm" 
+  pretty (Parm masks_len masks arrs_len arrs lam) = ppParm masks_len masks arrs_len arrs lam
+  pretty (Two nest arrs_len arrs lam) = ppTwo nest arrs_len arrs lam
+
+-- | Prettyprint the given Parm.
+ppParm :: 
+  (PrettyRep rep, Pretty m, Pretty inp) => SubExp -> m -> SubExp -> [inp] -> Lambda rep -> Doc ann
+ppParm masks_len masks arrs_len arrs lam =
+  "parm" 
     <> (parens . align)
       ( pretty masks_len <> comma
           </> pretty masks <> comma 
@@ -1060,8 +1068,12 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
           </> ppTuple' (map pretty arrs) <> comma
           </> pretty lam
       )
-  pretty (Two nest arrs_len arrs lam) =
-    "two" 
+
+-- | Prettyprint the given Two.
+ppTwo ::
+  (PrettyRep rep, Pretty inp) => SubExp -> SubExp -> [inp] -> Lambda rep -> Doc ann
+ppTwo nest arrs_len arrs lam =
+  "two" 
     <> (parens . align)
       ( pretty nest <> comma
           </> pretty arrs_len <> comma 

@@ -394,6 +394,7 @@ data SOAC rep
   | Scatter SubExp (Lambda rep) [Input] [(Shape, Int, VName)]
   | Screma SubExp (ScremaForm rep) [Input]
   | Hist SubExp [HistOp rep] (Lambda rep) [Input]
+  | Two SubExp SubExp (Lambda rep) [Input]
   deriving (Eq, Show)
 
 instance PP.Pretty Input where
@@ -421,6 +422,7 @@ instance PrettyRep rep => PP.Pretty (SOAC rep) where
   pretty (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
   pretty (Stream w lam nes arrs) = Futhark.ppStream w arrs nes lam
   pretty (Scatter w lam arrs dests) = Futhark.ppScatter w arrs lam dests
+  pretty (Two nest w lam arrs) = Futhark.ppTwo nest w arrs lam
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC rep -> [Input]
@@ -428,6 +430,7 @@ inputs (Stream _ _ _ arrs) = arrs
 inputs (Scatter _len _lam ivs _as) = ivs
 inputs (Screma _ _ arrs) = arrs
 inputs (Hist _ _ _ inps) = inps
+inputs (Two _ _ _ arrs) = arrs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC rep -> SOAC rep
@@ -439,6 +442,8 @@ setInputs arrs (Screma w form _) =
   Screma w form arrs
 setInputs inps (Hist w ops lam _) =
   Hist w ops lam inps
+setInputs inps (Two nest w lam _) =
+  Two nest w lam inps
 
 newWidth :: [Input] -> SubExp -> SubExp
 newWidth [] w = w
@@ -450,6 +455,7 @@ lambda (Stream _ lam _ _) = lam
 lambda (Scatter _len lam _ivs _as) = lam
 lambda (Screma _ (ScremaForm _ _ lam) _) = lam
 lambda (Hist _ _ lam _) = lam
+lambda (Two _ _ lam _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda rep -> SOAC rep -> SOAC rep
@@ -461,6 +467,8 @@ setLambda lam (Screma w (ScremaForm scan red _) arrs) =
   Screma w (ScremaForm scan red lam) arrs
 setLambda lam (Hist w ops _ inps) =
   Hist w ops lam inps
+setLambda lam (Two nest w _ inps) =
+  Two nest w lam inps
 
 -- | The return type of a SOAC.
 typeOf :: SOAC rep -> [Type]
@@ -482,6 +490,9 @@ typeOf (Screma w form _) =
 typeOf (Hist _ ops _ _) = do
   op <- ops
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
+typeOf (Two _ w lam _) = do
+  t <- lambdaReturnType lam
+  pure $ arrayOf (stripArray 1 t) (Shape [w]) NoUniqueness
 
 -- | The "width" of a SOAC is the expected outer size of its array
 -- inputs _after_ input-transforms have been carried out.
@@ -490,6 +501,7 @@ width (Stream w _ _ _) = w
 width (Scatter len _lam _ivs _as) = len
 width (Screma w _ _) = w
 width (Hist w _ _ _) = w
+width (Two _ w _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
 toExp ::
@@ -508,6 +520,8 @@ toSOAC (Screma w form arrs) =
   Futhark.Screma w <$> inputsToSubExps arrs <*> pure form
 toSOAC (Hist w ops lam arrs) =
   Futhark.Hist w <$> inputsToSubExps arrs <*> pure ops <*> pure lam
+toSOAC (Two nest w lam arrs) =
+  Futhark.Two nest w <$> inputsToSubExps arrs <*> pure lam
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -531,6 +545,8 @@ fromExp (Op (Futhark.Screma w arrs form)) =
   Right . Screma w form <$> traverse varInput arrs
 fromExp (Op (Futhark.Hist w arrs ops lam)) =
   Right . Hist w ops lam <$> traverse varInput arrs
+fromExp (Op (Futhark.Two nest w arrs lam)) =
+  Right . Two nest w lam <$> traverse varInput arrs
 fromExp _ = pure $ Left NotSOAC
 
 -- | To-Stream translation of SOACs.

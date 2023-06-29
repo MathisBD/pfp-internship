@@ -414,9 +414,7 @@ mergeBitCopies xs = maybe xs mergeBitCopies (msum $ map (tryMerge xs) ijs)
                 x = (v_out1, out_idx1, v_in1, in_idx1, offsets1 ++ map (+ delta_in) offsets2)
 
 genBitCopies :: [BitCopy] -> KernelCode 
-genBitCopies = 
-  mconcat . map genBitCopy
-  --mconcat . map genBitCopy . mergeBitCopies
+genBitCopies = mconcat . map genBitCopy . mergeBitCopies
 
 genBitCopy :: BitCopy -> KernelCode
 genBitCopy (v_out, out_idx, v_in, in_idx, offsets) = 
