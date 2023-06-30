@@ -36,6 +36,7 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Prop.Aliases
 import Futhark.IR.SOACS
+import Futhark.IR.SOACS.Parm ( composeBmmcs, invertBmmc )
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
@@ -211,20 +212,23 @@ instance HasSOAC (Wise SOACS) where
 
 topDownRules :: [TopDownRule (Wise SOACS)]
 topDownRules =
-  [ RuleOp hoistCerts,
-    RuleOp removeReplicateMapping,
-    RuleOp removeReplicateWrite,
-    RuleOp removeUnusedSOACInput,
-    RuleOp simplifyClosedFormReduce,
-    RuleOp simplifyKnownIterationSOAC,
-    RuleOp liftIdentityMapping,
-    RuleOp removeDuplicateMapOutput,
-    RuleOp fuseConcatScatter,
-    RuleOp simplifyMapIota,
-    RuleOp moveTransformToInput,
-    RuleBasicOp fuseBmmcs,
-    RuleBasicOp removeIdentityBmmc,
-    RuleBasicOp simplifyBmmcReplicate
+  [ RuleOp hoistCerts
+  , RuleOp removeReplicateMapping
+  , RuleOp removeReplicateWrite
+  , RuleOp removeUnusedSOACInput
+  , RuleOp simplifyClosedFormReduce
+  , RuleOp simplifyKnownIterationSOAC
+  , RuleOp liftIdentityMapping
+  , RuleOp removeDuplicateMapOutput
+  , RuleOp fuseConcatScatter
+  , RuleOp simplifyMapIota
+  , RuleOp moveTransformToInput
+  , RuleBasicOp fuseBmmcs
+  , RuleBasicOp removeIdentityBmmc
+  , RuleBasicOp simplifyBmmcReplicate
+  , RuleOp simplifyReduceBmmc
+  , RuleOp removeTwoIdentity
+  , RuleOp simplifyTwoMap
   ]
 
 bottomUpRules :: [BottomUpRule (Wise SOACS)]
@@ -997,11 +1001,13 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
 moveTransformToInput _ _ _ _ =
   Skip
 
+-- An identity BMMC is replaced with a copy
+-- (the result of a BMMC permutation can't alias the original array).
 removeIdentityBmmc :: TopDownRuleBasicOp (Wise SOACS)
 removeIdentityBmmc _ pat aux (Bmmc mat compl v) 
   | mat == B.identity (B.rows mat) && B.null compl = 
     Simplify $ auxing aux $ do 
-      letBind pat $ BasicOp $ SubExp $ Var v
+      letBind pat $ BasicOp $ Copy v
 removeIdentityBmmc _ _ _ _ = Skip
 
 fuseBmmcs :: TopDownRuleBasicOp (Wise SOACS)
@@ -1009,8 +1015,8 @@ fuseBmmcs vtable pat aux (Bmmc mat2 compl2 v2)
   | Just (e, certs) <- ST.lookupExp v2 vtable,
     BasicOp (Bmmc mat1 compl1 v1) <- removeExpWisdom e = 
     Simplify $ certifying certs $ auxing aux $ do
-      letBind pat $ BasicOp $ 
-        Bmmc (mat2 `B.mult` mat1) (mat2 `B.mult` compl1 `B.add` compl2) v1
+      let (mat, compl) = composeBmmcs (mat2, compl2) (mat1, compl1)
+      letBind pat $ BasicOp $ Bmmc mat compl v1
 fuseBmmcs _ _ _ _ = Skip
 
 simplifyBmmcReplicate :: TopDownRuleBasicOp (Wise SOACS)
@@ -1021,3 +1027,55 @@ simplifyBmmcReplicate vtable pat aux (Bmmc _ _ v)
     Simplify $ certifying certs $ auxing aux $ do
       letBind pat $ BasicOp $ Replicate sh x
 simplifyBmmcReplicate _ _ _ _ = Skip
+
+-- If all the inputs to a commutative reduce are permuted a BMMC, 
+-- we can remove the BMMC for at least one of the inputs (and possibly up to all of them).
+simplifyReduceBmmc :: TopDownRuleOp (Wise SOACS)
+simplifyReduceBmmc vtable pat aux op
+  | Just (Screma w arrs form) <- asSOAC op,
+    Just (reds, _) <- isRedomapSOAC form,
+    all ((== Commutative) . redComm) reds,
+    Just (exps, certs) <- unzip <$> traverse (`ST.lookupExp` vtable) arrs,
+    Just (m0:mats, c0:compls, v0:vs) <- unzip3 <$> traverse asBmmc exps
+    = Simplify $ certifying (mconcat certs) $ auxing aux $ do 
+      -- Transform every reduce input using the Bmmc  which is the inverse of (m0, c0).
+      -- The first input is treated differently since we know the resulting
+      -- Bmmc will be equal to (Id, 0).
+      v0' <- letExp "bmmc" $ BasicOp $ Copy v0
+      vs' <- forM (zip3 mats compls vs) $ \(mat, compl, v) -> do
+        let (mat', compl') = composeBmmcs (invertBmmc (m0, c0)) (mat, compl)
+        letExp "bmmc" $ BasicOp $ Bmmc mat' compl' v
+      
+      letBind pat $ Op $ Screma w (v0':vs') form
+   
+    where asBmmc (BasicOp (Bmmc mat compl v)) = Just (mat, compl, v)
+          asBmmc _ = Nothing
+simplifyReduceBmmc _ _ _ _ = Skip
+
+removeTwoIdentity :: TopDownRuleOp (Wise SOACS)
+removeTwoIdentity _ (Pat pes) aux op 
+  | Just (Two _ _ arrs lam) <- asSOAC op,
+    isIdentityLambda lam = Simplify $ auxing aux $ do 
+      forM_ (zip pes arrs) $ \(pe, arr) ->
+        letBind (Pat [pe]) $ BasicOp $ Copy arr
+removeTwoIdentity _ _ _ _ = Skip
+
+-- When the lambda of a 'two' is simply a map, 
+-- replace the statement with a map.
+simplifyTwoMap :: TopDownRuleOp (Wise SOACS)
+simplifyTwoMap _ pat aux op 
+  | Just (Two _ w arrs lam) <- asSOAC op,
+    Just map_lam <- asMap lam = Simplify $ auxing aux $ do 
+      letBind pat $ Op $ Screma w arrs (mapSOAC map_lam)
+simplifyTwoMap _ _ _ _ = Skip
+
+-- Is the provided lambda simply a map SOAC ?
+asMap :: HasSOAC rep => Lambda rep -> Maybe (Lambda rep)
+asMap lam
+  | [Let (Pat pes) _aux (Op op)] <- stmsToList $ bodyStms $ lambdaBody lam,
+    Just (Screma _ arrs form) <- asSOAC op,
+    Just map_lam <- isMapSOAC form,
+    arrs == map paramName (lambdaParams lam),
+    map (Var . patElemName) pes == map resSubExp (bodyResult $ lambdaBody lam) =
+      Just map_lam
+  | otherwise = Nothing

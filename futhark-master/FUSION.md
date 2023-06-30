@@ -9,6 +9,14 @@ let zs = bmmc A' c' ys
 ==> simplification
 let zs = bmmc (A' * A) (A' * c + c') xs
 
+let ys = two k w (\xs' -> map lam xs') xs
+==> simplification
+let ys = map lam xs
+
+let ys = two k w identity xs
+==> simplification
+let ys = xs
+
 let (..., ys, ...) = two k w lam1 xs
 let zs = two k w lam2 ys
 ==> fusion
@@ -27,7 +35,7 @@ let ys = two k1 w1 (\xs' -> two k2 w2 lam2 xs') xs
 let ys = two (k1 + k2) w1 lam2 xs
 
 let ys = two k w (\xs' -> ...1... let zs' = bmmc A c ys' ...2...) xs
-==> simplification
+==> ???
 let (ys1, ys2, ...) = two k w (\xs' -> ...1... return (ys1', ys2', ...)) xs
 let ysk = bmmc A' c' ys1
 let ys = two k w (\ys1' ys2' ... ysk' -> ...2...) ys1 ys2 ... ysk
